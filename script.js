@@ -5,6 +5,7 @@ const OVERLAY_BASE = "assets/overlays/";
 const EXPORT_MAX_BYTES = 250 * 1024;
 const EXPORT_TYPE = "image/png";
 const EXPORT_EXTENSION = "png";
+const KSP_MAX_CHARACTERS = 50;
 
 const outputMeta = {
   "category-banner": {
@@ -47,6 +48,7 @@ const state = {
   ksp: "EXCLUSIVE LAUNCH DISKON 25%",
   kvColor: "#315F55",
   outputs: new Set(Object.keys(outputMeta)),
+  skuPositions: {},
   hue: 166,
   saturation: 0.48,
   value: 0.37,
@@ -89,6 +91,11 @@ const imageContentBounds = new WeakMap();
 const zipEncoder = new TextEncoder();
 let fontReady;
 let renderVersion = 0;
+let skuDrag = null;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
 
 function hsvToRgb(h, s, v) {
   const c = v * s;
@@ -165,7 +172,7 @@ function titleCaseFileName(fileName) {
 }
 
 function normalizedKsp(value) {
-  return value.toUpperCase().slice(0, 31);
+  return value.slice(0, KSP_MAX_CHARACTERS);
 }
 
 function setStatus(message) {
@@ -218,11 +225,21 @@ function roundRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-function drawCover(ctx, image, x, y, width, height, alignX = 0.5, alignY = 0.5) {
-  if (!image) return;
+function getCoverMetrics(image, width, height) {
   const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
   const drawWidth = image.naturalWidth * scale;
   const drawHeight = image.naturalHeight * scale;
+  return {
+    drawWidth,
+    drawHeight,
+    overflowX: Math.max(0, drawWidth - width),
+    overflowY: Math.max(0, drawHeight - height),
+  };
+}
+
+function drawCover(ctx, image, x, y, width, height, alignX = 0.5, alignY = 0.5) {
+  if (!image) return;
+  const { drawWidth, drawHeight } = getCoverMetrics(image, width, height);
   const dx = x + (width - drawWidth) * alignX;
   const dy = y + (height - drawHeight) * alignY;
   ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
@@ -332,19 +349,42 @@ function drawStretch(ctx, image, x, y, width, height) {
   ctx.drawImage(image, x, y, width, height);
 }
 
+function splitLongWord(ctx, word, maxWidth) {
+  const parts = [];
+  let current = "";
+
+  Array.from(word).forEach((character) => {
+    const next = `${current}${character}`;
+    if (ctx.measureText(next).width <= maxWidth || !current) {
+      current = next;
+    } else {
+      parts.push(current);
+      current = character;
+    }
+  });
+
+  if (current) parts.push(current);
+  return parts;
+}
+
 function wrapText(ctx, text, maxWidth) {
-  const words = text.trim().split(/\s+/);
+  const words = text.trim().split(/\s+/).filter(Boolean);
   const lines = [];
   let current = "";
 
   words.forEach((word) => {
-    const next = current ? `${current} ${word}` : word;
-    if (ctx.measureText(next).width <= maxWidth || !current) {
-      current = next;
-    } else {
-      lines.push(current);
-      current = word;
-    }
+    const pieces =
+      ctx.measureText(word).width > maxWidth ? splitLongWord(ctx, word, maxWidth) : [word];
+
+    pieces.forEach((piece) => {
+      const next = current ? `${current} ${piece}` : piece;
+      if (ctx.measureText(next).width <= maxWidth || !current) {
+        current = next;
+      } else {
+        lines.push(current);
+        current = piece;
+      }
+    });
   });
 
   if (current) lines.push(current);
@@ -357,7 +397,7 @@ function drawFittedText(ctx, text, box, options = {}) {
     align = "center",
     baseline = "middle",
     maxSize = 58.67,
-    minSize = 24,
+    minSize = 10,
     lineHeight = 1.04,
   } = options;
 
@@ -370,6 +410,8 @@ function drawFittedText(ctx, text, box, options = {}) {
     if (lines.length * size * lineHeight <= box.height) break;
     size -= 2;
   }
+
+  size = Math.max(size, minSize);
 
   ctx.fillStyle = color;
   ctx.textAlign = align;
@@ -481,6 +523,24 @@ function drawBackground(ctx, format) {
   return layout;
 }
 
+function getSkuPosition(outputId, layout = null) {
+  const savedPosition = state.skuPositions[outputId];
+  if (savedPosition) return savedPosition;
+
+  const currentLayout = layout || getLayout(outputMeta[outputId]);
+  return {
+    x: currentLayout.productAlign[0],
+    y: currentLayout.productAlign[1],
+  };
+}
+
+function setSkuPosition(outputId, position) {
+  state.skuPositions[outputId] = {
+    x: clamp(position.x, 0, 1),
+    y: clamp(position.y, 0, 1),
+  };
+}
+
 async function drawOutput(outputId, canvas, options = {}) {
   const { scale = 1 } = options;
   const format = outputMeta[outputId];
@@ -506,6 +566,7 @@ async function drawOutput(outputId, canvas, options = {}) {
   ctx.beginPath();
   ctx.rect(layout.product.x, layout.product.y, layout.product.width, layout.product.height);
   ctx.clip();
+  const skuPosition = getSkuPosition(outputId, layout);
   drawCover(
     ctx,
     skuImage,
@@ -513,8 +574,8 @@ async function drawOutput(outputId, canvas, options = {}) {
     layout.product.y,
     layout.product.width,
     layout.product.height,
-    layout.productAlign[0],
-    layout.productAlign[1],
+    skuPosition.x,
+    skuPosition.y,
   );
   ctx.restore();
 
@@ -523,8 +584,98 @@ async function drawOutput(outputId, canvas, options = {}) {
   drawBrandCard(ctx, brandLogo, layout.logo);
   drawFittedText(ctx, state.ksp, layout.ksp, {
     maxSize: layout.ksp.maxSize,
-    minSize: layout.ksp.minSize,
+    minSize: 10,
   });
+}
+
+function canvasPointFromEvent(canvas, event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (canvas.width / rect.width),
+    y: (event.clientY - rect.top) * (canvas.height / rect.height),
+  };
+}
+
+function pointInsideBox(point, box) {
+  return (
+    point.x >= box.x &&
+    point.x <= box.x + box.width &&
+    point.y >= box.y &&
+    point.y <= box.y + box.height
+  );
+}
+
+function updateSkuPositionFromDrag(outputId, image, deltaX, deltaY) {
+  const format = outputMeta[outputId];
+  const layout = getLayout(format);
+  const position = getSkuPosition(outputId, layout);
+  const { overflowX, overflowY } = getCoverMetrics(
+    image,
+    layout.product.width,
+    layout.product.height,
+  );
+
+  const nextPosition = { ...position };
+  if (overflowX > 0.5) nextPosition.x -= deltaX / overflowX;
+  if (overflowY > 0.5) nextPosition.y -= deltaY / overflowY;
+  setSkuPosition(outputId, nextPosition);
+}
+
+function requestCanvasRedraw(outputId, canvas) {
+  if (canvas.renderFrame) cancelAnimationFrame(canvas.renderFrame);
+  canvas.renderFrame = requestAnimationFrame(() => {
+    canvas.renderFrame = 0;
+    drawOutput(outputId, canvas);
+  });
+}
+
+function endSkuDrag(event) {
+  if (!skuDrag || (event?.pointerId && event.pointerId !== skuDrag.pointerId)) return;
+  skuDrag.canvas.classList.remove("is-dragging");
+  skuDrag = null;
+  setStatus("Ready");
+}
+
+function bindSkuDrag(canvas, outputId) {
+  canvas.addEventListener("pointerdown", async (event) => {
+    if (event.button !== 0) return;
+
+    const layout = getLayout(outputMeta[outputId]);
+    const point = canvasPointFromEvent(canvas, event);
+    if (!pointInsideBox(point, layout.product)) return;
+
+    const image = await loadImage(state.skuImageUrl);
+    if (!image) return;
+
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    canvas.classList.add("is-dragging");
+    skuDrag = {
+      canvas,
+      outputId,
+      pointerId: event.pointerId,
+      image,
+      lastPoint: point,
+    };
+    setStatus("Positioning");
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!skuDrag || skuDrag.canvas !== canvas || skuDrag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const point = canvasPointFromEvent(canvas, event);
+    const deltaX = point.x - skuDrag.lastPoint.x;
+    const deltaY = point.y - skuDrag.lastPoint.y;
+    skuDrag.lastPoint = point;
+
+    updateSkuPositionFromDrag(outputId, skuDrag.image, deltaX, deltaY);
+    requestCanvasRedraw(outputId, canvas);
+  });
+
+  canvas.addEventListener("pointerup", endSkuDrag);
+  canvas.addEventListener("pointercancel", endSkuDrag);
+  canvas.addEventListener("lostpointercapture", endSkuDrag);
 }
 
 function createPreviewBlock(outputId) {
@@ -557,8 +708,10 @@ function createPreviewBlock(outputId) {
   shell.className = "canvas-shell";
   const canvas = document.createElement("canvas");
   canvas.className = "asset-canvas";
+  if (state.skuImageUrl) canvas.classList.add("can-drag");
   canvas.dataset.output = outputId;
   canvas.setAttribute("aria-label", `${format.title} preview`);
+  bindSkuDrag(canvas, outputId);
   shell.append(canvas);
 
   block.append(heading, shell);
@@ -707,6 +860,7 @@ function readFile(input, key, label) {
   }
 
   state[key] = URL.createObjectURL(file);
+  if (key === "skuImageUrl") state.skuPositions = {};
   label.textContent = titleCaseFileName(file.name);
   renderPreviews();
 }
@@ -719,7 +873,7 @@ function syncOutputButtons() {
 }
 
 function syncKspCount() {
-  els.kspCount.textContent = `${state.ksp.length}/31`;
+  els.kspCount.textContent = `${state.ksp.length}/${KSP_MAX_CHARACTERS}`;
 }
 
 function selectedOutputs() {

@@ -477,6 +477,15 @@ input[type="file"] {
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
 }
 
+.asset-canvas.can-drag {
+  cursor: grab;
+  touch-action: none;
+}
+
+.asset-canvas.can-drag.is-dragging {
+  cursor: grabbing;
+}
+
 .empty-state {
   min-height: 220px;
   display: grid;

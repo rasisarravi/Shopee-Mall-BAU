@@ -48,6 +48,7 @@ Opening `index.html` directly from the file system may block canvas image export
 ## Notes
 
 - All asset paths are relative.
-- The KSP input is limited to 31 characters.
+- Uploaded SKU images can be repositioned by dragging them inside each preview.
+- The KSP input is limited to 50 characters.
 - The output formats are Category Banner, Top Module Banner, IG Story, FB Post, and Banner Card.
 - The app can download a single PNG or a ZIP containing all selected outputs.
