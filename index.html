@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Campaign Creative Generator Prototype</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell" aria-label="Campaign creative generator prototype">
+      <aside class="control-panel" aria-label="Creative inputs">
+        <div class="panel-heading">
+          <p>Mall Creative Tool</p>
+          <h1>Generate campaign assets</h1>
+        </div>
+        <form class="input-stack">
+          <div class="form-row">
+            <label for="templateSelect">Template</label>
+            <div class="field-wrap">
+              <select id="templateSelect" name="template">
+                <option>Mall BAU</option>
+                <option>Mall Brand</option>
+                <option>SBD</option>
+                <option>BD</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label for="brandLogoInput">Brand Logo</label>
+            <div class="field-wrap">
+              <input id="brandLogoInput" type="file" accept="image/*" />
+              <label class="upload-box" for="brandLogoInput">
+                <span class="upload-icon" aria-hidden="true"></span>
+                <span id="brandFileName">Upload</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-row two-field-row">
+            <label for="skuImageInput">SKU Image</label>
+            <div class="field-wrap">
+              <input id="skuImageInput" type="file" accept="image/*" />
+              <label class="upload-box" for="skuImageInput">
+                <span class="upload-icon" aria-hidden="true"></span>
+                <span id="skuFileName">Upload</span>
+              </label>
+            </div>
+            <div class="field-wrap">
+              <input
+                id="skuLink"
+                type="url"
+                placeholder="Product Link"
+                autocomplete="url"
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label for="kspInput">KSP</label>
+            <div class="field-wrap span-wide field-with-meta">
+              <input
+                id="kspInput"
+                type="text"
+                value="EXCLUSIVE LAUNCH DISKON 25%"
+                maxlength="31"
+              />
+              <span id="kspCount">27/31</span>
+            </div>
+          </div>
+
+          <div class="form-row color-row">
+            <label for="hexInput">KV Color</label>
+            <div class="color-picker span-wide">
+              <div class="picker-top">
+                <div class="swatch-grid" id="swatchGrid" aria-label="Color swatches"></div>
+                <canvas
+                  id="colorCanvas"
+                  class="color-canvas"
+                  width="392"
+                  height="198"
+                  aria-label="Color picker"
+                ></canvas>
+              </div>
+              <div class="picker-bottom">
+                <label class="native-color" for="nativeColor">
+                  <span class="color-dot" id="colorDot"></span>
+                  <input id="nativeColor" type="color" value="#315f55" />
+                  <span>Pick</span>
+                </label>
+                <label class="hex-field" for="hexInput">
+                  <span>Hex</span>
+                  <input id="hexInput" type="text" value="#315F55" maxlength="7" />
+                </label>
+                <label class="hue-field" for="hueRange">
+                  <span>Hue</span>
+                  <input id="hueRange" type="range" min="0" max="360" value="166" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row output-row">
+            <label>Output</label>
+            <div
+              class="output-grid span-wide"
+              id="outputButtons"
+              role="listbox"
+              aria-label="Output formats"
+              aria-multiselectable="true"
+            >
+              <button type="button" data-output="category-banner" aria-selected="true">
+                Category Banner
+                <span>1200 x 360</span>
+              </button>
+              <button type="button" data-output="top-module-banner" aria-selected="true">
+                Top Module Banner
+                <span>1125 x 156</span>
+              </button>
+              <button type="button" data-output="ig-story" aria-selected="true">
+                IG Story
+                <span>1080 x 1920</span>
+              </button>
+              <button type="button" data-output="fb-post" aria-selected="true">
+                FB Post
+                <span>1200 x 630</span>
+              </button>
+              <button type="button" data-output="banner-card" aria-selected="true">
+                Banner Card
+                <span>531 x 792</span>
+              </button>
+            </div>
+          </div>
+
+          <button class="generate-button" id="generateButton" type="button">Generate</button>
+        </form>
+      </aside>
+
+      <section class="preview-stage" aria-label="Generated previews">
+        <div class="stage-header">
+          <div>
+            <p class="eyebrow" id="templateLabel">Mall BAU</p>
+            <h1>Generated Outputs</h1>
+          </div>
+          <div class="stage-actions">
+            <span class="status-pill" id="statusPill">Ready</span>
+            <button type="button" id="downloadAllButton">Download ZIP</button>
+          </div>
+        </div>
+        <div class="preview-list" id="previewList"></div>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
