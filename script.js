@@ -2,6 +2,10 @@ const DEFAULT_SKU_IMAGE = "";
 const FONT_NAME = "ShopeeFontBlack";
 const FONT_URL = "assets/fonts/shopee-font-black.ttf";
 const OVERLAY_BASE = "assets/overlays/";
+const OVERLAY_NO_CONTAINER_BASE = "assets/overlays-no-logo-container/";
+const NEW_ARRIVAL_OVERLAY_BASE = "assets/new-arrival/overlays/";
+const NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE =
+  "assets/new-arrival/overlays-no-logo-container/";
 const EXPORT_MAX_BYTES = 250 * 1024;
 const EXPORT_TYPE = "image/png";
 const EXPORT_EXTENSION = "png";
@@ -13,39 +17,72 @@ const outputMeta = {
     width: 1200,
     height: 360,
     overlay: `${OVERLAY_BASE}category-banner.png`,
+    overlayNoContainer: `${OVERLAY_NO_CONTAINER_BASE}category-banner.png`,
+    newArrivalOverlay: `${NEW_ARRIVAL_OVERLAY_BASE}category-banner.png`,
+    newArrivalOverlayNoContainer: `${NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE}category-banner.png`,
   },
   "top-module-banner": {
     title: "Top Module Banner",
     width: 1125,
     height: 156,
     overlay: `${OVERLAY_BASE}top-module-banner.png`,
+    overlayNoContainer: `${OVERLAY_NO_CONTAINER_BASE}top-module-banner.png`,
+    newArrivalOverlay: `${NEW_ARRIVAL_OVERLAY_BASE}top-module-banner.png`,
+    newArrivalOverlayNoContainer: `${NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE}top-module-banner.png`,
   },
   "ig-story": {
     title: "IG Story",
     width: 1080,
     height: 1920,
     overlay: `${OVERLAY_BASE}ig-story.png`,
+    overlayNoContainer: `${OVERLAY_NO_CONTAINER_BASE}ig-story.png`,
+    newArrivalOverlay: `${NEW_ARRIVAL_OVERLAY_BASE}ig-story.png`,
+    newArrivalOverlayNoContainer: `${NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE}ig-story.png`,
   },
   "fb-post": {
     title: "FB Post",
     width: 1200,
     height: 630,
     overlay: `${OVERLAY_BASE}fb-post.png`,
+    overlayNoContainer: `${OVERLAY_NO_CONTAINER_BASE}fb-post.png`,
+    newArrivalOverlay: `${NEW_ARRIVAL_OVERLAY_BASE}fb-post.png`,
+    newArrivalOverlayNoContainer: `${NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE}fb-post.png`,
   },
   "banner-card": {
     title: "Banner Card",
     width: 531,
     height: 792,
     overlay: `${OVERLAY_BASE}banner-card.png`,
+    overlayNoContainer: `${OVERLAY_NO_CONTAINER_BASE}banner-card.png`,
+    newArrivalOverlay: `${NEW_ARRIVAL_OVERLAY_BASE}banner-card.png`,
+    newArrivalOverlayNoContainer: `${NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE}banner-card.png`,
   },
+};
+
+const newArrivalLogoBoxes = {
+  "Category Banner": { x: 99.2, y: 117.5, width: 294.4, height: 97.5, radius: 18 },
+  "Top Module Banner": { x: 361.5, y: 14.2, width: 198.7, height: 65.9, radius: 12 },
+  "IG Story": { x: 282.9, y: 467.2, width: 514.5, height: 170.2, radius: 30 },
+  "FB Post": { x: 122.4, y: 264, width: 373.6, height: 124, radius: 23 },
+  "Banner Card": { x: 128.8, y: 162.1, width: 274.1, height: 91.3, radius: 17 },
+};
+
+const newArrivalKspBoxes = {
+  "Category Banner": { x: 50, y: 240, width: 400, height: 90, maxSize: 42, minSize: 22 },
+  "Top Module Banner": { x: 332, y: 90, width: 258, height: 58, maxSize: 25, minSize: 14 },
+  "IG Story": { x: 135, y: 675, width: 810, height: 150, maxSize: 68, minSize: 34 },
+  "FB Post": { x: 72, y: 420, width: 474, height: 110, maxSize: 50, minSize: 28 },
+  "Banner Card": { x: 70, y: 270, width: 392, height: 90, maxSize: 42, minSize: 24 },
 };
 
 const state = {
   template: "Mall BAU",
   brandLogoUrl: "",
+  hideLogoContainer: false,
   skuImageUrl: DEFAULT_SKU_IMAGE,
   skuLink: "",
   ksp: "EXCLUSIVE LAUNCH DISKON 25%",
+  kspColor: "#FFFFFF",
   kvColor: "#315F55",
   outputs: new Set(Object.keys(outputMeta)),
   skuPositions: {},
@@ -59,11 +96,16 @@ const els = {
   templateLabel: document.querySelector("#templateLabel"),
   brandLogoInput: document.querySelector("#brandLogoInput"),
   brandFileName: document.querySelector("#brandFileName"),
+  logoContainerToggle: document.querySelector("#logoContainerToggle"),
   skuImageInput: document.querySelector("#skuImageInput"),
   skuFileName: document.querySelector("#skuFileName"),
   skuLink: document.querySelector("#skuLink"),
+  loadSkuLinkButton: document.querySelector("#loadSkuLinkButton"),
   kspInput: document.querySelector("#kspInput"),
   kspCount: document.querySelector("#kspCount"),
+  kspColorInput: document.querySelector("#kspColorInput"),
+  kspColorHex: document.querySelector("#kspColorHex"),
+  kspColorDot: document.querySelector("#kspColorDot"),
   nativeColor: document.querySelector("#nativeColor"),
   hexInput: document.querySelector("#hexInput"),
   hueRange: document.querySelector("#hueRange"),
@@ -205,6 +247,7 @@ function loadImage(src) {
 
   const promise = new Promise((resolve, reject) => {
     const image = new Image();
+    if (/^https?:\/\//i.test(src)) image.crossOrigin = "anonymous";
     image.onload = () => resolve(image);
     image.onerror = () => resolve(null);
     image.src = src;
@@ -212,6 +255,128 @@ function loadImage(src) {
 
   imageCache.set(src, promise);
   return promise;
+}
+
+function getImageCandidates(value) {
+  const input = value.trim();
+  if (!input) return [];
+  if (/^(data|blob):/i.test(input)) return [input];
+  if (input.startsWith("//")) return [`https:${input}`];
+
+  try {
+    const url = new URL(input);
+    const fileMatch = url.pathname.match(/\/file\/([^/?#]+)/);
+    const candidates = [url.href];
+    if (fileMatch?.[1]) {
+      const hash = fileMatch[1];
+      candidates.push(
+        `https://down-id.img.susercontent.com/file/${hash}`,
+        `https://cf.shopee.co.id/file/${hash}`,
+      );
+    }
+    return [...new Set(candidates)];
+  } catch {
+    const hash = input
+      .replace(/^["']|["']$/g, "")
+      .replace(/^\/?file\//i, "")
+      .split(/[?#\s]/)[0]
+      .trim();
+
+    if (!hash) return [];
+
+    return [
+      `https://down-id.img.susercontent.com/file/${hash}`,
+      `https://cf.shopee.co.id/file/${hash}`,
+      `https://down-id.img.susercontent.com/file/${hash}_tn`,
+      `https://cf.shopee.co.id/file/${hash}_tn`,
+    ];
+  }
+}
+
+function imageLabelFromSource(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return "Linked image";
+  const clean = trimmed.split(/[?#\s]/)[0];
+  const lastPart = clean.split("/").filter(Boolean).pop() || "Linked image";
+  return titleCaseFileName(lastPart);
+}
+
+async function fetchImageObjectUrl(src) {
+  if (/^(data|blob):/i.test(src)) return src;
+
+  const response = await fetch(src, {
+    mode: "cors",
+    credentials: "omit",
+  });
+
+  if (!response.ok) throw new Error(`Image request failed with ${response.status}.`);
+
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) throw new Error("The link did not return an image.");
+
+  const objectUrl = URL.createObjectURL(blob);
+  const image = await loadImage(objectUrl);
+  if (!image) {
+    URL.revokeObjectURL(objectUrl);
+    throw new Error("The image could not be opened.");
+  }
+
+  return objectUrl;
+}
+
+function setSkuImageUrl(url, labelText) {
+  if (state.skuImageUrl?.startsWith("blob:") && state.skuImageUrl !== url) {
+    imageCache.delete(state.skuImageUrl);
+    URL.revokeObjectURL(state.skuImageUrl);
+  }
+
+  state.skuImageUrl = url;
+  state.skuPositions = {};
+  els.skuFileName.textContent = labelText || "Linked image";
+}
+
+async function loadSkuImageFromInput() {
+  const source = els.skuLink.value.trim();
+  const candidates = getImageCandidates(source);
+
+  if (!candidates.length) {
+    setStatus("Add image link");
+    window.setTimeout(() => setStatus("Ready"), 1800);
+    return;
+  }
+
+  const originalLabel = els.loadSkuLinkButton.textContent;
+  els.loadSkuLinkButton.disabled = true;
+  els.loadSkuLinkButton.textContent = "Loading...";
+  setStatus("Loading image");
+
+  try {
+    let loadedUrl = "";
+    let lastError = null;
+
+    for (const candidate of candidates) {
+      try {
+        loadedUrl = await fetchImageObjectUrl(candidate);
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (!loadedUrl) throw lastError || new Error("Image could not be loaded.");
+
+    setSkuImageUrl(loadedUrl, imageLabelFromSource(source));
+    await renderPreviews();
+    setStatus("Image loaded");
+    window.setTimeout(() => setStatus("Ready"), 1400);
+  } catch (error) {
+    console.error("Image link failed", error);
+    setStatus("Image load failed");
+    window.setTimeout(() => setStatus("Ready"), 2200);
+  } finally {
+    els.loadSkuLinkButton.disabled = false;
+    els.loadSkuLinkButton.textContent = originalLabel;
+  }
 }
 
 function roundRect(ctx, x, y, width, height, radius) {
@@ -438,24 +603,23 @@ function drawFallbackBrand(ctx, box) {
   ctx.fillText("cottonseeds", box.x + box.width / 2, box.y + box.height / 2);
 }
 
-function drawBrandCard(ctx, image, box) {
+function drawBrandLogo(ctx, image, box) {
   ctx.save();
-  ctx.fillStyle = "#FFFFFF";
-  roundRect(ctx, box.x, box.y, box.width, box.height, box.radius);
-  ctx.fill();
   roundRect(ctx, box.x, box.y, box.width, box.height, box.radius);
   ctx.clip();
 
   if (image) {
+    const insetX = box.width * 0.06;
+    const insetY = box.height * 0.1;
     drawContainTrimmed(
       ctx,
       image,
-      box.x + box.width * 0.06,
-      box.y + box.height * 0.1,
-      box.width * 0.88,
-      box.height * 0.8,
+      box.x + insetX,
+      box.y + insetY,
+      box.width - insetX * 2,
+      box.height - insetY * 2,
     );
-  } else {
+  } else if (!state.hideLogoContainer) {
     drawFallbackBrand(ctx, box);
   }
 
@@ -464,13 +628,23 @@ function drawBrandCard(ctx, image, box) {
 
 function getLayout(format) {
   const { width: w, height: h } = format;
+  const newArrivalLogo = state.template === "Mall BAU New Arrival"
+    ? newArrivalLogoBoxes[format.title]
+    : null;
+  const newArrivalKsp = state.template === "Mall BAU New Arrival"
+    ? newArrivalKspBoxes[format.title]
+    : null;
 
   if (format.title === "Top Module Banner") {
     return {
       kv: { x: 0, y: 0, width: 720, height: h },
       product: { x: 720, y: 0, width: w - 720, height: h },
-      logo: { x: 35.749, y: 35.248, width: 257.201, height: 85.504, radius: 15.199 },
-      ksp: { x: 346, y: 28, width: 330, height: 100, maxSize: 58.67, minSize: 30 },
+      logo:
+        newArrivalLogo ||
+        { x: 35.749, y: 35.248, width: 257.201, height: 85.504, radius: 15.199 },
+      ksp:
+        newArrivalKsp ||
+        { x: 346, y: 28, width: 330, height: 100, maxSize: 58.67, minSize: 30 },
       productAlign: [0.5, 0.62],
     };
   }
@@ -479,8 +653,12 @@ function getLayout(format) {
     return {
       kv: { x: 0, y: 0, width: 500, height: h },
       product: { x: 500, y: 0, width: w - 500, height: h },
-      logo: { x: 88.3, y: 78.903, width: 322.668, height: 107.268, radius: 19.068 },
-      ksp: { x: 38, y: 202, width: 424, height: 120, maxSize: 58.67, minSize: 34 },
+      logo:
+        newArrivalLogo ||
+        { x: 88.3, y: 78.903, width: 322.668, height: 107.268, radius: 19.068 },
+      ksp:
+        newArrivalKsp ||
+        { x: 38, y: 202, width: 424, height: 120, maxSize: 58.67, minSize: 34 },
       productAlign: [0.62, 0.58],
     };
   }
@@ -489,8 +667,12 @@ function getLayout(format) {
     return {
       kv: { x: 0, y: 0, width: w, height: 850 },
       product: { x: 0, y: 850, width: w, height: h - 850 },
-      logo: { x: 255.742, y: 380.519, width: 568.516, height: 188.998, radius: 33.596 },
-      ksp: { x: 180, y: 615, width: 720, height: 190, maxSize: 58.67, minSize: 36 },
+      logo:
+        newArrivalLogo ||
+        { x: 255.742, y: 380.519, width: 568.516, height: 188.998, radius: 33.596 },
+      ksp:
+        newArrivalKsp ||
+        { x: 135, y: 590, width: 810, height: 230, maxSize: 86, minSize: 42 },
       productAlign: [0.5, 0.45],
     };
   }
@@ -499,8 +681,12 @@ function getLayout(format) {
     return {
       kv: { x: 0, y: 0, width: 607, height: h },
       product: { x: 607, y: 0, width: w - 607, height: h },
-      logo: { x: 119.976, y: 196.548, width: 342.137, height: 144.934, radius: 23.803 },
-      ksp: { x: 120, y: 394, width: 344, height: 150, maxSize: 58.67, minSize: 36 },
+      logo:
+        newArrivalLogo ||
+        { x: 119.976, y: 196.548, width: 342.137, height: 144.934, radius: 23.803 },
+      ksp:
+        newArrivalKsp ||
+        { x: 120, y: 394, width: 344, height: 150, maxSize: 58.67, minSize: 36 },
       productAlign: [0.56, 0.55],
     };
   }
@@ -508,8 +694,12 @@ function getLayout(format) {
   return {
     kv: { x: 0, y: 0, width: w, height: 414 },
     product: { x: 0, y: 414, width: w, height: h - 414 },
-    logo: { x: 114.998, y: 91.451, width: 301.003, height: 100.066, radius: 17.787 },
-    ksp: { x: 70, y: 239, width: 392, height: 128, maxSize: 58.67, minSize: 34 },
+    logo:
+      newArrivalLogo ||
+      { x: 114.998, y: 91.451, width: 301.003, height: 100.066, radius: 17.787 },
+    ksp:
+      newArrivalKsp ||
+      { x: 70, y: 239, width: 392, height: 128, maxSize: 58.67, minSize: 34 },
     productAlign: [0.5, 0.42],
   };
 }
@@ -541,6 +731,18 @@ function setSkuPosition(outputId, position) {
   };
 }
 
+function getOverlaySrc(format) {
+  if (state.template === "Mall BAU New Arrival") {
+    if (state.hideLogoContainer && format.newArrivalOverlayNoContainer) {
+      return format.newArrivalOverlayNoContainer;
+    }
+    return format.newArrivalOverlay;
+  }
+
+  if (state.hideLogoContainer && format.overlayNoContainer) return format.overlayNoContainer;
+  return format.overlay;
+}
+
 async function drawOutput(outputId, canvas, options = {}) {
   const { scale = 1 } = options;
   const format = outputMeta[outputId];
@@ -556,7 +758,7 @@ async function drawOutput(outputId, canvas, options = {}) {
   const [brandLogo, skuImage, overlay] = await Promise.all([
     loadImage(state.brandLogoUrl),
     loadImage(state.skuImageUrl),
-    loadImage(format.overlay),
+    loadImage(getOverlaySrc(format)),
   ]);
 
   ctx.clearRect(0, 0, format.width, format.height);
@@ -581,8 +783,9 @@ async function drawOutput(outputId, canvas, options = {}) {
 
   // The overlay contains fixed elements from the working file, including the ribbon.
   drawStretch(ctx, overlay, 0, 0, format.width, format.height);
-  drawBrandCard(ctx, brandLogo, layout.logo);
+  drawBrandLogo(ctx, brandLogo, layout.logo);
   drawFittedText(ctx, state.ksp, layout.ksp, {
+    color: state.kspColor,
     maxSize: layout.ksp.maxSize,
     minSize: 10,
   });
@@ -821,6 +1024,17 @@ function setColor(hex, syncFromHex = true) {
 
   renderSwatchCurrent();
   drawColorCanvas();
+  renderPreviews();
+}
+
+function setKspColor(hex) {
+  const normalized = hex.startsWith("#") ? hex.toUpperCase() : `#${hex.toUpperCase()}`;
+  if (!isHex(normalized)) return;
+
+  state.kspColor = normalized;
+  els.kspColorInput.value = normalized;
+  els.kspColorHex.value = normalized;
+  els.kspColorDot.style.background = normalized;
   renderPreviews();
 }
 
@@ -1102,6 +1316,11 @@ els.brandLogoInput.addEventListener("change", () => {
   readFile(els.brandLogoInput, "brandLogoUrl", els.brandFileName);
 });
 
+els.logoContainerToggle.addEventListener("change", (event) => {
+  state.hideLogoContainer = event.target.checked;
+  renderPreviews();
+});
+
 els.skuImageInput.addEventListener("change", () => {
   readFile(els.skuImageInput, "skuImageUrl", els.skuFileName);
 });
@@ -1110,12 +1329,31 @@ els.skuLink.addEventListener("input", (event) => {
   state.skuLink = event.target.value;
 });
 
+els.skuLink.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  loadSkuImageFromInput();
+});
+
+els.loadSkuLinkButton.addEventListener("click", loadSkuImageFromInput);
+
 els.kspInput.addEventListener("input", (event) => {
   const value = normalizedKsp(event.target.value);
   if (value !== event.target.value) event.target.value = value;
   state.ksp = value;
   syncKspCount();
   renderPreviews();
+});
+
+els.kspColorInput.addEventListener("input", (event) => {
+  setKspColor(event.target.value);
+});
+
+els.kspColorHex.addEventListener("input", (event) => {
+  const value = event.target.value.startsWith("#")
+    ? event.target.value
+    : `#${event.target.value}`;
+  if (isHex(value)) setKspColor(value);
 });
 
 els.nativeColor.addEventListener("input", (event) => {
@@ -1172,4 +1410,5 @@ renderSwatches();
 syncOutputButtons();
 syncKspCount();
 drawColorCanvas();
+setKspColor(state.kspColor);
 setColor(state.kvColor);

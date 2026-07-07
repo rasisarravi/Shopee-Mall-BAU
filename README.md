@@ -48,7 +48,11 @@ Opening `index.html` directly from the file system may block canvas image export
 ## Notes
 
 - All asset paths are relative.
+- Template options are `Mall BAU` and `Mall BAU New Arrival`.
+- Turn on `Hide white logo container` to use the no-container Template 2 overlays.
+- Enter an image hash or image link, then click `Load Image` to place that image into the SKU area.
 - Uploaded SKU images can be repositioned by dragging them inside each preview.
 - The KSP input is limited to 50 characters.
+- KSP text color can be changed with the color picker or hex field.
 - The output formats are Category Banner, Top Module Banner, IG Story, FB Post, and Banner Card.
 - The app can download a single PNG or a ZIP containing all selected outputs.

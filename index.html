@@ -19,9 +19,7 @@
             <div class="field-wrap">
               <select id="templateSelect" name="template">
                 <option>Mall BAU</option>
-                <option>Mall Brand</option>
-                <option>SBD</option>
-                <option>BD</option>
+                <option>Mall BAU New Arrival</option>
               </select>
             </div>
           </div>
@@ -35,6 +33,11 @@
                 <span id="brandFileName">Upload</span>
               </label>
             </div>
+            <label class="toggle-row span-wide" for="logoContainerToggle">
+              <input id="logoContainerToggle" type="checkbox" />
+              <span class="toggle-track" aria-hidden="true"></span>
+              <span>Hide white logo container</span>
+            </label>
           </div>
 
           <div class="form-row two-field-row">
@@ -46,13 +49,16 @@
                 <span id="skuFileName">Upload</span>
               </label>
             </div>
-            <div class="field-wrap">
+            <div class="field-wrap link-action-row">
               <input
                 id="skuLink"
-                type="url"
-                placeholder="Product Link"
-                autocomplete="url"
+                type="text"
+                placeholder="Image Hash / Image Link"
+                autocomplete="off"
               />
+              <button class="field-action-button" id="loadSkuLinkButton" type="button">
+                Load Image
+              </button>
             </div>
           </div>
 
@@ -66,6 +72,21 @@
                 maxlength="50"
               />
               <span id="kspCount">27/50</span>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label for="kspColorInput">KSP Text Color</label>
+            <div class="inline-color-control span-wide">
+              <label class="native-color compact-color" for="kspColorInput">
+                <span class="color-dot" id="kspColorDot"></span>
+                <input id="kspColorInput" type="color" value="#ffffff" />
+                <span>Pick</span>
+              </label>
+              <label class="hex-field" for="kspColorHex">
+                <span>Hex</span>
+                <input id="kspColorHex" type="text" value="#FFFFFF" maxlength="7" />
+              </label>
             </div>
           </div>
 

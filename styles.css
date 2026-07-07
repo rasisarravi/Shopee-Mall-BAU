@@ -220,6 +220,85 @@ input[type="file"] {
   display: none;
 }
 
+.link-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 116px;
+  gap: 10px;
+}
+
+.field-action-button {
+  min-height: 46px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--shopee);
+  color: #fff;
+  font-weight: 850;
+}
+
+.field-action-button:hover {
+  background: var(--shopee-dark);
+}
+
+.field-action-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.toggle-row {
+  display: inline-grid;
+  grid-template-columns: 42px 1fr;
+  gap: 10px;
+  align-items: center;
+  justify-self: start;
+  color: #30343a;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-row input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-track {
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: #d8dde3;
+  position: relative;
+  transition:
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+  transition: transform 140ms ease;
+}
+
+.toggle-row input:checked + .toggle-track {
+  background: var(--shopee);
+}
+
+.toggle-row input:checked + .toggle-track::after {
+  transform: translateX(18px);
+}
+
+.toggle-row input:focus-visible + .toggle-track {
+  box-shadow: 0 0 0 3px rgba(238, 77, 45, 0.18);
+}
+
 .color-picker {
   background: #fff;
   border: 1px solid var(--line);
@@ -302,6 +381,18 @@ input[type="file"] {
   border-radius: 50%;
   border: 1px solid #bfc5cc;
   background: var(--kv);
+}
+
+.inline-color-control {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.compact-color {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .hex-field input {
@@ -543,6 +634,8 @@ input[type="file"] {
 
   .picker-top,
   .picker-bottom,
+  .inline-color-control,
+  .link-action-row,
   .output-grid {
     grid-template-columns: 1fr;
   }
