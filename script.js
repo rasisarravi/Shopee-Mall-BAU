@@ -6,9 +6,21 @@ const OVERLAY_NO_CONTAINER_BASE = "assets/overlays-no-logo-container/";
 const NEW_ARRIVAL_OVERLAY_BASE = "assets/new-arrival/overlays/";
 const NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE =
   "assets/new-arrival/overlays-no-logo-container/";
-const EXPORT_MAX_BYTES = 250 * 1024;
+const ORANGE_SHOPEE_LOGO_URL = "assets/logos/Shopee-Logo-Vertical-Orange-icon.png";
+const EXPORT_MAX_BYTES = 250 * 1000;
+const EXPORT_TARGET_BYTES = 248 * 1000;
 const EXPORT_TYPE = "image/png";
 const EXPORT_EXTENSION = "png";
+const LOSSY_EXPORT_FORMATS = [
+  { type: "image/webp", extension: "webp", label: "WebP", minQuality: 0.01, maxQuality: 0.95 },
+  { type: "image/jpeg", extension: "jpg", label: "JPG", minQuality: 0.01, maxQuality: 0.95 },
+];
+const DETAIL_LIMIT_SCALES = [0.85, 0.72, 0.6, 0.5, 0.42, 0.35, 0.28, 0.22, 0.16, 0.1, 0.06];
+const SIZE_LIMITED_OUTPUTS = new Set(["category-banner", "top-module-banner", "banner-card"]);
+const EXTERNAL_SHOPEE_LOGO_OUTPUTS = new Set(["ig-story", "fb-post"]);
+const SKU_ZOOM_MIN = 1;
+const SKU_ZOOM_MAX = 2.5;
+const SKU_ZOOM_DEFAULT = 1;
 const KSP_MAX_CHARACTERS = 50;
 
 const outputMeta = {
@@ -75,10 +87,21 @@ const newArrivalKspBoxes = {
   "Banner Card": { x: 70, y: 270, width: 392, height: 90, maxSize: 42, minSize: 24 },
 };
 
+const externalShopeeLogoBoxes = {
+  "ig-story": { x: 61, y: 180, width: 114, height: 128 },
+  "fb-post": { x: 41, y: 39, width: 66, height: 74 },
+};
+
+const externalShopeeLogoClearBoxes = {
+  "ig-story": { x: 50, y: 168, width: 138, height: 154 },
+  "fb-post": { x: 34, y: 31, width: 82, height: 92 },
+};
+
 const state = {
   template: "Mall BAU",
   brandLogoUrl: "",
   hideLogoContainer: false,
+  useOrangeShopeeLogo: false,
   skuImageUrl: DEFAULT_SKU_IMAGE,
   skuLink: "",
   ksp: "EXCLUSIVE LAUNCH DISKON 25%",
@@ -86,6 +109,7 @@ const state = {
   kvColor: "#315F55",
   outputs: new Set(Object.keys(outputMeta)),
   skuPositions: {},
+  skuZooms: {},
   hue: 166,
   saturation: 0.48,
   value: 0.37,
@@ -97,6 +121,7 @@ const els = {
   brandLogoInput: document.querySelector("#brandLogoInput"),
   brandFileName: document.querySelector("#brandFileName"),
   logoContainerToggle: document.querySelector("#logoContainerToggle"),
+  shopeeLogoToggle: document.querySelector("#shopeeLogoToggle"),
   skuImageInput: document.querySelector("#skuImageInput"),
   skuFileName: document.querySelector("#skuFileName"),
   skuLink: document.querySelector("#skuLink"),
@@ -332,6 +357,7 @@ function setSkuImageUrl(url, labelText) {
 
   state.skuImageUrl = url;
   state.skuPositions = {};
+  state.skuZooms = {};
   els.skuFileName.textContent = labelText || "Linked image";
 }
 
@@ -390,8 +416,10 @@ function roundRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-function getCoverMetrics(image, width, height) {
-  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+function getCoverMetrics(image, width, height, zoom = SKU_ZOOM_DEFAULT) {
+  const scale =
+    Math.max(width / image.naturalWidth, height / image.naturalHeight) *
+    clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
   const drawWidth = image.naturalWidth * scale;
   const drawHeight = image.naturalHeight * scale;
   return {
@@ -402,9 +430,19 @@ function getCoverMetrics(image, width, height) {
   };
 }
 
-function drawCover(ctx, image, x, y, width, height, alignX = 0.5, alignY = 0.5) {
+function drawCover(
+  ctx,
+  image,
+  x,
+  y,
+  width,
+  height,
+  alignX = 0.5,
+  alignY = 0.5,
+  zoom = SKU_ZOOM_DEFAULT,
+) {
   if (!image) return;
-  const { drawWidth, drawHeight } = getCoverMetrics(image, width, height);
+  const { drawWidth, drawHeight } = getCoverMetrics(image, width, height, zoom);
   const dx = x + (width - drawWidth) * alignX;
   const dy = y + (height - drawHeight) * alignY;
   ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
@@ -731,6 +769,14 @@ function setSkuPosition(outputId, position) {
   };
 }
 
+function getSkuZoom(outputId) {
+  return state.skuZooms[outputId] || SKU_ZOOM_DEFAULT;
+}
+
+function setSkuZoom(outputId, zoom) {
+  state.skuZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
+}
+
 function getOverlaySrc(format) {
   if (state.template === "Mall BAU New Arrival") {
     if (state.hideLogoContainer && format.newArrivalOverlayNoContainer) {
@@ -755,10 +801,13 @@ async function drawOutput(outputId, canvas, options = {}) {
 
   await ensureFont();
 
-  const [brandLogo, skuImage, overlay] = await Promise.all([
+  const shouldUseOrangeShopeeLogo =
+    state.useOrangeShopeeLogo && EXTERNAL_SHOPEE_LOGO_OUTPUTS.has(outputId);
+  const [brandLogo, skuImage, overlay, orangeShopeeLogo] = await Promise.all([
     loadImage(state.brandLogoUrl),
     loadImage(state.skuImageUrl),
     loadImage(getOverlaySrc(format)),
+    loadImage(shouldUseOrangeShopeeLogo ? ORANGE_SHOPEE_LOGO_URL : ""),
   ]);
 
   ctx.clearRect(0, 0, format.width, format.height);
@@ -769,6 +818,7 @@ async function drawOutput(outputId, canvas, options = {}) {
   ctx.rect(layout.product.x, layout.product.y, layout.product.width, layout.product.height);
   ctx.clip();
   const skuPosition = getSkuPosition(outputId, layout);
+  const skuZoom = getSkuZoom(outputId);
   drawCover(
     ctx,
     skuImage,
@@ -778,11 +828,25 @@ async function drawOutput(outputId, canvas, options = {}) {
     layout.product.height,
     skuPosition.x,
     skuPosition.y,
+    skuZoom,
   );
   ctx.restore();
 
   // The overlay contains fixed elements from the working file, including the ribbon.
   drawStretch(ctx, overlay, 0, 0, format.width, format.height);
+  if (shouldUseOrangeShopeeLogo && orangeShopeeLogo) {
+    const clearBox = externalShopeeLogoClearBoxes[outputId];
+    const logoBox = externalShopeeLogoBoxes[outputId];
+    ctx.fillStyle = state.kvColor;
+    ctx.fillRect(clearBox.x, clearBox.y, clearBox.width, clearBox.height);
+    ctx.drawImage(
+      orangeShopeeLogo,
+      logoBox.x,
+      logoBox.y,
+      logoBox.width,
+      logoBox.height,
+    );
+  }
   drawBrandLogo(ctx, brandLogo, layout.logo);
   drawFittedText(ctx, state.ksp, layout.ksp, {
     color: state.kspColor,
@@ -812,10 +876,12 @@ function updateSkuPositionFromDrag(outputId, image, deltaX, deltaY) {
   const format = outputMeta[outputId];
   const layout = getLayout(format);
   const position = getSkuPosition(outputId, layout);
+  const zoom = getSkuZoom(outputId);
   const { overflowX, overflowY } = getCoverMetrics(
     image,
     layout.product.width,
     layout.product.height,
+    zoom,
   );
 
   const nextPosition = { ...position };
@@ -885,6 +951,7 @@ function createPreviewBlock(outputId) {
   const format = outputMeta[outputId];
   const block = document.createElement("section");
   block.className = "preview-block";
+  let canvas;
 
   const heading = document.createElement("div");
   heading.className = "preview-heading";
@@ -899,17 +966,42 @@ function createPreviewBlock(outputId) {
   meta.textContent = `${format.width} x ${format.height}px`;
   titleWrap.append(title, meta);
 
+  const actions = document.createElement("div");
+  actions.className = "preview-actions";
+
+  const zoomControl = document.createElement("label");
+  zoomControl.className = "zoom-control";
+  const zoomLabel = document.createElement("span");
+  zoomLabel.textContent = "SKU Zoom";
+  const zoomInput = document.createElement("input");
+  zoomInput.type = "range";
+  zoomInput.min = String(SKU_ZOOM_MIN * 100);
+  zoomInput.max = String(SKU_ZOOM_MAX * 100);
+  zoomInput.step = "5";
+  zoomInput.value = String(Math.round(getSkuZoom(outputId) * 100));
+  zoomInput.setAttribute("aria-label", `${format.title} SKU zoom`);
+  const zoomValue = document.createElement("span");
+  zoomValue.className = "zoom-value";
+  zoomValue.textContent = `${zoomInput.value}%`;
+  zoomInput.addEventListener("input", () => {
+    setSkuZoom(outputId, Number(zoomInput.value) / 100);
+    zoomValue.textContent = `${zoomInput.value}%`;
+    if (canvas) requestCanvasRedraw(outputId, canvas);
+  });
+  zoomControl.append(zoomLabel, zoomInput, zoomValue);
+
   const download = document.createElement("button");
   download.type = "button";
   download.className = "download-button";
-  download.textContent = "Download PNG";
+  download.textContent = "Download";
   download.addEventListener("click", () => downloadCanvas(outputId));
+  actions.append(zoomControl, download);
 
-  heading.append(titleWrap, download);
+  heading.append(titleWrap, actions);
 
   const shell = document.createElement("div");
   shell.className = "canvas-shell";
-  const canvas = document.createElement("canvas");
+  canvas = document.createElement("canvas");
   canvas.className = "asset-canvas";
   if (state.skuImageUrl) canvas.classList.add("can-drag");
   canvas.dataset.output = outputId;
@@ -1074,7 +1166,10 @@ function readFile(input, key, label) {
   }
 
   state[key] = URL.createObjectURL(file);
-  if (key === "skuImageUrl") state.skuPositions = {};
+  if (key === "skuImageUrl") {
+    state.skuPositions = {};
+    state.skuZooms = {};
+  }
   label.textContent = titleCaseFileName(file.name);
   renderPreviews();
 }
@@ -1096,7 +1191,17 @@ function selectedOutputs() {
 
 function outputFileName(outputId) {
   const format = outputMeta[outputId];
-  return `${format.title.replace(/\s+/g, "-").toLowerCase()}-${format.width}x${format.height}.${EXPORT_EXTENSION}`;
+  return outputFileNameWithExtension(outputId, EXPORT_EXTENSION);
+}
+
+function outputFileNameWithExtension(outputId, extension) {
+  const format = outputMeta[outputId];
+  return `${format.title.replace(/\s+/g, "-").toLowerCase()}-${format.width}x${format.height}.${extension}`;
+}
+
+function formatFileSize(bytes) {
+  if (bytes >= 1000 * 1000) return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
+  return `${Math.ceil(bytes / 1000)} KB`;
 }
 
 function downloadBlob(blob, fileName) {
@@ -1110,17 +1215,133 @@ function downloadBlob(blob, fileName) {
   window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-function canvasToBlob(canvas, type = EXPORT_TYPE) {
+function canvasToBlob(canvas, type = EXPORT_TYPE, quality = undefined) {
   return new Promise((resolve, reject) => {
     try {
       canvas.toBlob((blob) => {
         if (blob) resolve(blob);
         else reject(new Error("Canvas export returned an empty file."));
-      }, type);
+      }, type, quality);
     } catch (error) {
       reject(error);
     }
   });
+}
+
+function isRequestedBlobType(blob, type) {
+  return type === EXPORT_TYPE || blob.type === type;
+}
+
+async function encodeCanvas(canvas, type = EXPORT_TYPE, quality = undefined) {
+  const blob = await canvasToBlob(canvas, type, quality);
+  return isRequestedBlobType(blob, type) ? blob : null;
+}
+
+function createOpaqueCanvas(canvas) {
+  const opaqueCanvas = document.createElement("canvas");
+  opaqueCanvas.width = canvas.width;
+  opaqueCanvas.height = canvas.height;
+  const ctx = opaqueCanvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, opaqueCanvas.width, opaqueCanvas.height);
+  ctx.drawImage(canvas, 0, 0);
+  return opaqueCanvas;
+}
+
+function createDetailLimitedCanvas(canvas, scale) {
+  const scaledWidth = Math.max(1, Math.round(canvas.width * scale));
+  const scaledHeight = Math.max(1, Math.round(canvas.height * scale));
+  const smallCanvas = document.createElement("canvas");
+  smallCanvas.width = scaledWidth;
+  smallCanvas.height = scaledHeight;
+
+  const smallCtx = smallCanvas.getContext("2d");
+  smallCtx.imageSmoothingEnabled = true;
+  smallCtx.imageSmoothingQuality = "high";
+  smallCtx.drawImage(canvas, 0, 0, scaledWidth, scaledHeight);
+
+  const detailCanvas = document.createElement("canvas");
+  detailCanvas.width = canvas.width;
+  detailCanvas.height = canvas.height;
+  const detailCtx = detailCanvas.getContext("2d");
+  detailCtx.imageSmoothingEnabled = true;
+  detailCtx.imageSmoothingQuality = "high";
+  detailCtx.fillStyle = "#FFFFFF";
+  detailCtx.fillRect(0, 0, detailCanvas.width, detailCanvas.height);
+  detailCtx.drawImage(smallCanvas, 0, 0, detailCanvas.width, detailCanvas.height);
+  return detailCanvas;
+}
+
+async function createLossyExport(canvas, format) {
+  const sourceCanvas = format.type === "image/jpeg" ? createOpaqueCanvas(canvas) : canvas;
+  let low = format.minQuality;
+  let high = format.maxQuality;
+  let bestUnderLimit = null;
+  let smallestFile = null;
+
+  for (let attempt = 0; attempt < 9; attempt += 1) {
+    const quality = (low + high) / 2;
+    const blob = await encodeCanvas(sourceCanvas, format.type, quality);
+    if (!blob) return null;
+
+    const file = {
+      blob,
+      extension: format.extension,
+      label: format.label,
+      quality,
+    };
+
+    if (!smallestFile || blob.size < smallestFile.blob.size) smallestFile = file;
+
+    if (blob.size <= EXPORT_TARGET_BYTES) {
+      bestUnderLimit = file;
+      low = quality;
+    } else {
+      high = quality;
+    }
+  }
+
+  if (!bestUnderLimit) {
+    const blob = await encodeCanvas(sourceCanvas, format.type, format.minQuality);
+    if (blob) {
+      const file = {
+        blob,
+        extension: format.extension,
+        label: format.label,
+        quality: format.minQuality,
+      };
+      if (!smallestFile || blob.size < smallestFile.blob.size) smallestFile = file;
+      if (blob.size <= EXPORT_TARGET_BYTES) bestUnderLimit = file;
+    }
+  }
+
+  return bestUnderLimit || smallestFile;
+}
+
+async function createEmergencyExport(canvas) {
+  let smallestFile = null;
+
+  for (const scale of DETAIL_LIMIT_SCALES) {
+    const detailCanvas = createDetailLimitedCanvas(canvas, scale);
+    for (const format of LOSSY_EXPORT_FORMATS) {
+      const sourceCanvas =
+        format.type === "image/jpeg" ? createOpaqueCanvas(detailCanvas) : detailCanvas;
+      const blob = await encodeCanvas(sourceCanvas, format.type, format.minQuality);
+      if (!blob) continue;
+
+      const file = {
+        blob,
+        extension: format.extension,
+        label: format.label,
+        quality: format.minQuality,
+      };
+
+      if (!smallestFile || blob.size < smallestFile.blob.size) smallestFile = file;
+      if (blob.size <= EXPORT_TARGET_BYTES) return file;
+    }
+  }
+
+  return smallestFile;
 }
 
 async function renderExportCanvas(outputId) {
@@ -1135,17 +1356,85 @@ async function renderExportCanvas(outputId) {
   return exportCanvas;
 }
 
-async function createExportBlob(outputId) {
+async function createExportFile(outputId) {
   const canvas = await renderExportCanvas(outputId);
-  return canvasToBlob(canvas, EXPORT_TYPE);
+  const pngBlob = await encodeCanvas(canvas, EXPORT_TYPE);
+  const sizeLimited = SIZE_LIMITED_OUTPUTS.has(outputId);
+
+  if (!sizeLimited) {
+    if (!pngBlob) throw new Error("PNG export failed.");
+    return {
+      name: outputFileName(outputId),
+      blob: pngBlob,
+      label: "PNG",
+      sizeLimited,
+    };
+  }
+
+  if (pngBlob && pngBlob.size <= EXPORT_TARGET_BYTES) {
+    return {
+      name: outputFileName(outputId),
+      blob: pngBlob,
+      label: "PNG",
+      sizeLimited,
+    };
+  }
+
+  let smallestFile = pngBlob
+    ? {
+        name: outputFileName(outputId),
+        blob: pngBlob,
+        label: "PNG",
+        sizeLimited,
+      }
+    : null;
+
+  for (const format of LOSSY_EXPORT_FORMATS) {
+    const file = await createLossyExport(canvas, format);
+    if (!file) continue;
+
+    const namedFile = {
+      ...file,
+      name: outputFileNameWithExtension(outputId, file.extension),
+      sizeLimited,
+    };
+
+    if (!smallestFile || namedFile.blob.size < smallestFile.blob.size) {
+      smallestFile = namedFile;
+    }
+
+    if (namedFile.blob.size <= EXPORT_TARGET_BYTES) return namedFile;
+  }
+
+  const emergencyFile = await createEmergencyExport(canvas);
+  if (emergencyFile) {
+    const namedEmergencyFile = {
+      ...emergencyFile,
+      name: outputFileNameWithExtension(outputId, emergencyFile.extension),
+      sizeLimited,
+    };
+
+    if (!smallestFile || namedEmergencyFile.blob.size < smallestFile.blob.size) {
+      smallestFile = namedEmergencyFile;
+    }
+
+    if (namedEmergencyFile.blob.size <= EXPORT_TARGET_BYTES) return namedEmergencyFile;
+  }
+
+  if (smallestFile) return smallestFile;
+  throw new Error("No export file was generated.");
 }
 
 async function downloadCanvas(outputId) {
   try {
-    setStatus("Exporting PNG");
-    const blob = await createExportBlob(outputId);
-    downloadBlob(blob, outputFileName(outputId));
-    setStatus(blob.size <= EXPORT_MAX_BYTES ? "Ready" : "Over 250 KB");
+    setStatus("Compressing");
+    const file = await createExportFile(outputId);
+    downloadBlob(file.blob, file.name);
+    setStatus(
+      !file.sizeLimited || file.blob.size <= EXPORT_MAX_BYTES
+        ? `${file.label} ${formatFileSize(file.blob.size)}`
+        : "Over 250 KB",
+    );
   } catch (error) {
     console.error("Download failed", error);
     setStatus(error?.name === "SecurityError" ? "Use local server" : "Download failed");
@@ -1280,19 +1569,21 @@ async function downloadAll() {
 
   try {
     await renderPreviews();
-    setStatus("Exporting PNGs");
+    setStatus("Compressing assets");
 
     const files = [];
     for (const outputId of selected) {
-      const blob = await createExportBlob(outputId);
-      if (blob) files.push({ name: outputFileName(outputId), blob });
+      const file = await createExportFile(outputId);
+      if (file?.blob) files.push(file);
     }
 
-    if (!files.length) throw new Error("No PNG files were generated.");
+    if (!files.length) throw new Error("No files were generated.");
 
     const zip = await createZip(files);
     downloadBlob(zip, "campaign-assets.zip");
-    const hasOversizedFile = files.some((file) => file.blob.size > EXPORT_MAX_BYTES);
+    const hasOversizedFile = files.some(
+      (file) => file.sizeLimited && file.blob.size > EXPORT_MAX_BYTES,
+    );
     setStatus(hasOversizedFile ? "Some > 250 KB" : "Ready");
   } catch (error) {
     console.error("Download failed", error);
@@ -1318,6 +1609,11 @@ els.brandLogoInput.addEventListener("change", () => {
 
 els.logoContainerToggle.addEventListener("change", (event) => {
   state.hideLogoContainer = event.target.checked;
+  renderPreviews();
+});
+
+els.shopeeLogoToggle.addEventListener("change", (event) => {
+  state.useOrangeShopeeLogo = event.target.checked;
   renderPreviews();
 });
 

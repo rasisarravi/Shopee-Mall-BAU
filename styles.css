@@ -522,6 +522,36 @@ input[type="file"] {
   margin-bottom: 12px;
 }
 
+.preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.zoom-control {
+  min-width: 190px;
+  display: grid;
+  grid-template-columns: auto minmax(88px, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.zoom-control input {
+  width: 100%;
+  accent-color: var(--shopee);
+}
+
+.zoom-value {
+  text-align: right;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
 .preview-title {
   margin: 0;
   color: var(--ink);
@@ -649,9 +679,14 @@ input[type="file"] {
     flex-direction: column;
   }
 
+  .preview-actions,
   .stage-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .zoom-control {
+    width: 100%;
   }
 
   .download-button,

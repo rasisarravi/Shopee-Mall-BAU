@@ -6,7 +6,7 @@ A static campaign asset generator for Shopee creative formats. The tool runs ful
 
 - `index.html` as the entry point
 - `styles.css` for the interface
-- `script.js` for preview rendering and PNG/ZIP downloads
+- `script.js` for preview rendering and size-safe downloads
 - `assets/fonts/` for ShopeeFont
 - `assets/overlays/` for fixed output overlays
 - `assets/logos/` for Shopee Mall logo references
@@ -50,9 +50,14 @@ Opening `index.html` directly from the file system may block canvas image export
 - All asset paths are relative.
 - Template options are `Mall BAU` and `Mall BAU New Arrival`.
 - Turn on `Hide white logo container` to use the no-container Template 2 overlays.
+- Turn on `Orange icon for IG Story & FB Post` when the external Shopee logo needs to stay visible on light KV colors.
 - Enter an image hash or image link, then click `Load Image` to place that image into the SKU area.
 - Uploaded SKU images can be repositioned by dragging them inside each preview.
+- SKU images can be zoomed per output from the preview controls.
 - The KSP input is limited to 50 characters.
 - KSP text color can be changed with the color picker or hex field.
 - The output formats are Category Banner, Top Module Banner, IG Story, FB Post, and Banner Card.
-- The app can download a single PNG or a ZIP containing all selected outputs.
+- Category Banner, Top Module Banner, and Banner Card are compressed to stay under 250 KB when possible.
+- IG Story and FB Post export as full-size PNG because they are not internal-platform assets.
+- For size-limited outputs, the app keeps PNG when it is already under the limit. Heavier photo-based assets are automatically exported as WebP or JPG to keep the file size below 250 KB.
+- The app can download a single asset or a ZIP containing all selected outputs.
