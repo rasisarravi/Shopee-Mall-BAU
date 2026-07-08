@@ -141,6 +141,7 @@ const els = {
   downloadAllButton: document.querySelector("#downloadAllButton"),
   previewList: document.querySelector("#previewList"),
   statusPill: document.querySelector("#statusPill"),
+  themeToggle: document.querySelector("#themeToggle"),
 };
 
 const swatches = [
@@ -789,7 +790,7 @@ function getOverlaySrc(format) {
 }
 
 async function drawOutput(outputId, canvas, options = {}) {
-  const { scale = 1 } = options;
+  const { scale = 1, photoOverride = null } = options;
   const format = outputMeta[outputId];
   const ctx = canvas.getContext("2d");
   canvas.width = Math.round(format.width * scale);
@@ -804,7 +805,7 @@ async function drawOutput(outputId, canvas, options = {}) {
     state.useOrangeShopeeLogo && EXTERNAL_SHOPEE_LOGO_OUTPUTS.has(outputId);
   const [brandLogo, skuImage, overlay, orangeShopeeLogo] = await Promise.all([
     loadImage(state.brandLogoUrl),
-    loadImage(state.skuImageUrl),
+    photoOverride ? Promise.resolve(null) : loadImage(state.skuImageUrl),
     loadImage(getOverlaySrc(format)),
     loadImage(shouldUseOrangeShopeeLogo ? ORANGE_SHOPEE_LOGO_URL : ""),
   ]);
@@ -816,19 +817,32 @@ async function drawOutput(outputId, canvas, options = {}) {
   ctx.beginPath();
   ctx.rect(layout.product.x, layout.product.y, layout.product.width, layout.product.height);
   ctx.clip();
-  const skuPosition = getSkuPosition(outputId, layout);
-  const skuZoom = getSkuZoom(outputId);
-  drawCover(
-    ctx,
-    skuImage,
-    layout.product.x,
-    layout.product.y,
-    layout.product.width,
-    layout.product.height,
-    skuPosition.x,
-    skuPosition.y,
-    skuZoom,
-  );
+  if (photoOverride) {
+    // Pre-rendered photo layer (possibly softened to shrink file size). Drawing it as a
+    // single image here means it never gets re-encoded, so this pass stays lossless for
+    // every non-photo pixel (overlay ribbon, logos, KSP text) that gets drawn afterwards.
+    ctx.drawImage(
+      photoOverride,
+      layout.product.x,
+      layout.product.y,
+      layout.product.width,
+      layout.product.height,
+    );
+  } else {
+    const skuPosition = getSkuPosition(outputId, layout);
+    const skuZoom = getSkuZoom(outputId);
+    drawCover(
+      ctx,
+      skuImage,
+      layout.product.x,
+      layout.product.y,
+      layout.product.width,
+      layout.product.height,
+      skuPosition.x,
+      skuPosition.y,
+      skuZoom,
+    );
+  }
   ctx.restore();
 
   // The overlay contains fixed elements from the working file, including the ribbon.
@@ -1271,6 +1285,71 @@ function createDetailLimitedCanvas(canvas, scale) {
   return detailCanvas;
 }
 
+const PHOTO_SOFTEN_QUALITIES = [0.92, 0.82, 0.7, 0.58, 0.46, 0.34, 0.24, 0.16, 0.1, 0.06, 0.03];
+
+// Renders only the SKU photo (the sole photographic, high-entropy region of the banner)
+// into its own canvas at the exact size it occupies in the final output. Optionally passes
+// it through one JPEG encode/decode round trip to reduce its detail/noise before it gets
+// composited back in. Everything else in the banner (KV background, overlay ribbon/badge,
+// brand logo, KSP text) is flat graphic content that a lossless PNG encodes near-perfectly,
+// so keeping those pixels out of any lossy step is what keeps them crisp.
+async function createPhotoLayer(outputId, quality) {
+  const format = outputMeta[outputId];
+  const layout = getLayout(format);
+  const skuImage = await loadImage(state.skuImageUrl);
+
+  const photoCanvas = document.createElement("canvas");
+  photoCanvas.width = Math.max(1, Math.round(layout.product.width));
+  photoCanvas.height = Math.max(1, Math.round(layout.product.height));
+  const photoCtx = photoCanvas.getContext("2d");
+  photoCtx.imageSmoothingEnabled = true;
+  photoCtx.imageSmoothingQuality = "high";
+  photoCtx.fillStyle = "#FFFFFF";
+  photoCtx.fillRect(0, 0, photoCanvas.width, photoCanvas.height);
+
+  if (skuImage) {
+    const skuPosition = getSkuPosition(outputId, layout);
+    const skuZoom = getSkuZoom(outputId);
+    drawCover(
+      photoCtx,
+      skuImage,
+      0,
+      0,
+      photoCanvas.width,
+      photoCanvas.height,
+      skuPosition.x,
+      skuPosition.y,
+      skuZoom,
+    );
+  }
+
+  if (!quality || typeof createImageBitmap !== "function") return photoCanvas;
+
+  const jpegBlob = await encodeCanvas(photoCanvas, "image/jpeg", quality);
+  if (!jpegBlob) return photoCanvas;
+
+  try {
+    const softened = await createImageBitmap(jpegBlob);
+    const softCanvas = document.createElement("canvas");
+    softCanvas.width = photoCanvas.width;
+    softCanvas.height = photoCanvas.height;
+    softCanvas.getContext("2d").drawImage(softened, 0, 0);
+    return softCanvas;
+  } catch {
+    return photoCanvas;
+  }
+}
+
+async function renderPngWithSoftenedPhoto(outputId, quality) {
+  const format = outputMeta[outputId];
+  const photoLayer = await createPhotoLayer(outputId, quality);
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = format.width;
+  exportCanvas.height = format.height;
+  await drawOutput(outputId, exportCanvas, { photoOverride: photoLayer });
+  return exportCanvas;
+}
+
 async function createLossyExport(canvas, format) {
   const sourceCanvas = format.type === "image/jpeg" ? createOpaqueCanvas(canvas) : canvas;
   let low = format.minQuality;
@@ -1387,6 +1466,24 @@ async function createExportFile(outputId) {
         sizeLimited,
       }
     : null;
+
+  // Try shrinking by softening only the photo region and keeping the ribbon/logo/text
+  // crisp, re-exporting as lossless PNG each time, before falling back to full JPEG.
+  for (const quality of PHOTO_SOFTEN_QUALITIES) {
+    const softCanvas = await renderPngWithSoftenedPhoto(outputId, quality);
+    const softPngBlob = await encodeCanvas(softCanvas, EXPORT_TYPE);
+    if (!softPngBlob) continue;
+
+    const file = {
+      name: outputFileName(outputId),
+      blob: softPngBlob,
+      label: "PNG",
+      sizeLimited,
+    };
+
+    if (!smallestFile || file.blob.size < smallestFile.blob.size) smallestFile = file;
+    if (file.blob.size <= EXPORT_TARGET_BYTES) return file;
+  }
 
   for (const format of LOSSY_EXPORT_FORMATS) {
     const file = await createLossyExport(canvas, format);
@@ -1701,9 +1798,50 @@ els.generateButton.addEventListener("click", () => {
 
 els.downloadAllButton.addEventListener("click", downloadAll);
 
+const THEME_STORAGE_KEY = "shopeeMallTheme";
+
+function getStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredTheme(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Ignore storage errors (e.g. private browsing).
+  }
+}
+
+function applyTheme(isLight) {
+  if (isLight) document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+  if (!els.themeToggle) return;
+  els.themeToggle.setAttribute("aria-pressed", String(isLight));
+  els.themeToggle.setAttribute(
+    "aria-label",
+    isLight ? "Switch to dark mode" : "Switch to light mode",
+  );
+}
+
+function initTheme() {
+  // Dark is the default; only an explicit "light" preference switches it off.
+  applyTheme(getStoredTheme() === "light");
+}
+
+els.themeToggle?.addEventListener("click", () => {
+  const isLight = document.documentElement.getAttribute("data-theme") !== "light";
+  applyTheme(isLight);
+  setStoredTheme(isLight ? "light" : "dark");
+});
+
 renderSwatches();
 syncOutputButtons();
 syncKspCount();
 drawColorCanvas();
 setKspColor(state.kspColor);
 setColor(state.kvColor);
+initTheme();

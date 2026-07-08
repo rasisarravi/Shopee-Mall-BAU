@@ -7,6 +7,45 @@
 }
 
 :root {
+  /* Dark theme is the default look. */
+  color-scheme: dark;
+  --page: #101214;
+  --surface: #1a1d22;
+  --surface-soft: #21252b;
+  --ink: #eef0f2;
+  --muted: #9199a3;
+  --line: #2f333b;
+  --shopee: #ee4d2d;
+  --shopee-dark: #ff6a45;
+  --kv: #315f55;
+  --radius: 8px;
+  --panel-shadow: rgba(0, 0, 0, 0.45);
+  --field-bg: #23262c;
+  --label-color: #e7e9ec;
+  --toggle-label-color: #e7e9ec;
+  --upload-border: #3a3f47;
+  --upload-color: #d7dadf;
+  --upload-hover-bg: rgba(238, 77, 45, 0.14);
+  --toggle-track-bg: #3a3f47;
+  --toggle-knob-bg: #eef0f2;
+  --toggle-knob-shadow: rgba(0, 0, 0, 0.4);
+  --swatch-border: rgba(255, 255, 255, 0.16);
+  --picker-border: #3a3f47;
+  --color-dot-border: #4b515a;
+  --select-arrow-color: #9199a3;
+  --placeholder-color: #6b7078;
+  --output-selected-bg: rgba(238, 77, 45, 0.18);
+  --output-selected-shadow: rgba(238, 77, 45, 0.32);
+  --checker-color: #2a2e34;
+  --asset-shadow: rgba(0, 0, 0, 0.55);
+  --empty-border: #3a3f47;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
   --page: #f6f7f8;
   --surface: #ffffff;
   --surface-soft: #f1f3f5;
@@ -16,10 +55,26 @@
   --shopee: #ee4d2d;
   --shopee-dark: #cf3d22;
   --kv: #315f55;
-  --radius: 8px;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  --panel-shadow: rgba(15, 23, 42, 0.08);
+  --field-bg: #ffffff;
+  --label-color: #2a2d31;
+  --toggle-label-color: #30343a;
+  --upload-border: #cbd0d6;
+  --upload-color: #30343a;
+  --upload-hover-bg: #fff7f4;
+  --toggle-track-bg: #d8dde3;
+  --toggle-knob-bg: #ffffff;
+  --toggle-knob-shadow: rgba(15, 23, 42, 0.22);
+  --swatch-border: rgba(0, 0, 0, 0.14);
+  --picker-border: #d8dde3;
+  --color-dot-border: #bfc5cc;
+  --select-arrow-color: #60646a;
+  --placeholder-color: #a5a9af;
+  --output-selected-bg: #fff2ed;
+  --output-selected-shadow: rgba(238, 77, 45, 0.22);
+  --checker-color: #f4f6f8;
+  --asset-shadow: rgba(15, 23, 42, 0.14);
+  --empty-border: #c7ccd3;
 }
 
 * {
@@ -35,6 +90,60 @@ body {
   margin: 0;
   background: var(--page);
   color: var(--ink);
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.theme-toggle {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 50;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  box-shadow: 0 6px 16px var(--panel-shadow);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 120ms ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--shopee);
+  color: var(--shopee);
+}
+
+.theme-toggle:active {
+  transform: scale(0.92);
+}
+
+.theme-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.theme-icon-sun {
+  display: none;
+}
+
+.theme-icon-moon {
+  display: block;
+}
+
+:root[data-theme="light"] .theme-icon-sun {
+  display: block;
+}
+
+:root[data-theme="light"] .theme-icon-moon {
+  display: none;
 }
 
 button,
@@ -60,7 +169,10 @@ button {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 18px;
-  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 46px var(--panel-shadow);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
 }
 
 .control-panel {
@@ -110,7 +222,7 @@ button {
 
 .form-row > label,
 .output-row > label {
-  color: #2a2d31;
+  color: var(--label-color);
   font-size: 13px;
   font-weight: 750;
 }
@@ -145,13 +257,14 @@ input[type="url"] {
   height: 46px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--field-bg);
   color: var(--ink);
   padding: 0 14px;
   outline: none;
   transition:
     border-color 140ms ease,
-    box-shadow 140ms ease;
+    box-shadow 140ms ease,
+    background-color 160ms ease;
 }
 
 select:focus,
@@ -164,8 +277,8 @@ input[type="url"]:focus {
 select {
   appearance: none;
   background-image:
-    linear-gradient(45deg, transparent 50%, #60646a 50%),
-    linear-gradient(135deg, #60646a 50%, transparent 50%);
+    linear-gradient(45deg, transparent 50%, var(--select-arrow-color) 50%),
+    linear-gradient(135deg, var(--select-arrow-color) 50%, transparent 50%);
   background-position:
     calc(100% - 20px) 19px,
     calc(100% - 14px) 19px;
@@ -176,7 +289,7 @@ select {
 }
 
 input::placeholder {
-  color: #a5a9af;
+  color: var(--placeholder-color);
   font-style: italic;
 }
 
@@ -191,10 +304,10 @@ input[type="file"] {
 .upload-box {
   min-height: 46px;
   width: 100%;
-  border: 1px dashed #cbd0d6;
+  border: 1px dashed var(--upload-border);
   border-radius: var(--radius);
   background: var(--surface-soft);
-  color: #30343a;
+  color: var(--upload-color);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -202,12 +315,16 @@ input[type="file"] {
   padding: 0 14px;
   font-weight: 750;
   overflow: hidden;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease;
 }
 
 .upload-box:hover {
   border-color: var(--shopee);
   color: var(--shopee);
-  background: #fff7f4;
+  background: var(--upload-hover-bg);
 }
 
 .upload-box span:last-child {
@@ -250,7 +367,7 @@ input[type="file"] {
   gap: 10px;
   align-items: center;
   justify-self: start;
-  color: #30343a;
+  color: var(--toggle-label-color);
   font-size: 13px;
   font-weight: 750;
   cursor: pointer;
@@ -267,7 +384,7 @@ input[type="file"] {
   width: 42px;
   height: 24px;
   border-radius: 999px;
-  background: #d8dde3;
+  background: var(--toggle-track-bg);
   position: relative;
   transition:
     background 140ms ease,
@@ -282,8 +399,8 @@ input[type="file"] {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+  background: var(--toggle-knob-bg);
+  box-shadow: 0 2px 6px var(--toggle-knob-shadow);
   transition: transform 140ms ease;
 }
 
@@ -300,7 +417,7 @@ input[type="file"] {
 }
 
 .color-picker {
-  background: #fff;
+  background: var(--field-bg);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 10px;
@@ -322,7 +439,7 @@ input[type="file"] {
 .swatch-grid button {
   aspect-ratio: 1;
   min-width: 0;
-  border: 1px solid rgba(0, 0, 0, 0.14);
+  border: 1px solid var(--swatch-border);
   border-radius: 8px;
 }
 
@@ -334,7 +451,7 @@ input[type="file"] {
 .color-canvas {
   width: 100%;
   height: 190px;
-  border: 1px solid #d8dde3;
+  border: 1px solid var(--picker-border);
   border-radius: 8px;
   cursor: crosshair;
   display: block;
@@ -379,7 +496,7 @@ input[type="file"] {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 1px solid #bfc5cc;
+  border: 1px solid var(--color-dot-border);
   background: var(--kv);
 }
 
@@ -400,6 +517,8 @@ input[type="file"] {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--ink);
   padding: 0 8px;
   text-transform: uppercase;
 }
@@ -419,8 +538,8 @@ input[type="file"] {
   min-height: 62px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fff;
-  color: #33373d;
+  background: var(--field-bg);
+  color: var(--upload-color);
   display: grid;
   place-items: center;
   gap: 2px;
@@ -437,9 +556,9 @@ input[type="file"] {
 
 .output-grid button[aria-selected="true"] {
   border-color: var(--shopee);
-  background: #fff2ed;
+  background: var(--output-selected-bg);
   color: var(--shopee);
-  box-shadow: inset 0 0 0 1px rgba(238, 77, 45, 0.22);
+  box-shadow: inset 0 0 0 1px var(--output-selected-shadow);
 }
 
 .generate-button,
@@ -510,7 +629,7 @@ input[type="file"] {
 .preview-block {
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fff;
+  background: var(--field-bg);
   padding: 14px;
 }
 
@@ -573,11 +692,11 @@ input[type="file"] {
   place-items: center;
   border-radius: 10px;
   background:
-    linear-gradient(45deg, #f4f6f8 25%, transparent 25%),
-    linear-gradient(-45deg, #f4f6f8 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #f4f6f8 75%),
-    linear-gradient(-45deg, transparent 75%, #f4f6f8 75%);
-  background-color: #fff;
+    linear-gradient(45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-color) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-color) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-color) 75%);
+  background-color: var(--field-bg);
   background-size: 18px 18px;
   background-position:
     0 0,
@@ -595,7 +714,7 @@ input[type="file"] {
   height: auto;
   display: block;
   object-fit: contain;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 12px 28px var(--asset-shadow);
 }
 
 .asset-canvas.can-drag {
@@ -611,7 +730,7 @@ input[type="file"] {
   min-height: 220px;
   display: grid;
   place-items: center;
-  border: 1px dashed #c7ccd3;
+  border: 1px dashed var(--empty-border);
   border-radius: 12px;
   color: var(--muted);
   text-align: center;
