@@ -12,7 +12,6 @@ const EXPORT_TARGET_BYTES = 248 * 1000;
 const EXPORT_TYPE = "image/png";
 const EXPORT_EXTENSION = "png";
 const LOSSY_EXPORT_FORMATS = [
-  { type: "image/webp", extension: "webp", label: "WebP", minQuality: 0.01, maxQuality: 0.95 },
   { type: "image/jpeg", extension: "jpg", label: "JPG", minQuality: 0.01, maxQuality: 0.95 },
 ];
 const DETAIL_LIMIT_SCALES = [0.85, 0.72, 0.6, 0.5, 0.42, 0.35, 0.28, 0.22, 0.16, 0.1, 0.06];

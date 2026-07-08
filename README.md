@@ -59,5 +59,5 @@ Opening `index.html` directly from the file system may block canvas image export
 - The output formats are Category Banner, Top Module Banner, IG Story, FB Post, and Banner Card.
 - Category Banner, Top Module Banner, and Banner Card are compressed to stay under 250 KB when possible.
 - IG Story and FB Post export as full-size PNG because they are not internal-platform assets.
-- For size-limited outputs, the app keeps PNG when it is already under the limit. Heavier photo-based assets are automatically exported as WebP or JPG to keep the file size below 250 KB.
+- For size-limited outputs, the app keeps PNG when it is already under the limit. Heavier photo-based assets are automatically exported as JPG (quality reduced, then resolution reduced if needed) to keep the file size below 250 KB. WebP is never used since the downstream internal system only supports PNG and JPG.
 - The app can download a single asset or a ZIP containing all selected outputs.
