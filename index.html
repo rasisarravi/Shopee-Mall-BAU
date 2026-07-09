@@ -71,12 +71,13 @@
           </div>
 
           <div class="form-row">
-            <label for="shopeeLogoToggle">Shopee Logo</label>
+            <label for="shopeeLogoToggle">Logo Color</label>
             <label class="toggle-row span-wide" for="shopeeLogoToggle">
               <input id="shopeeLogoToggle" type="checkbox" />
               <span class="toggle-track" aria-hidden="true"></span>
-              <span>Orange icon for IG Story & FB Post</span>
+              <span>Colored logos for light KV colors</span>
             </label>
+            <p class="field-hint">New Arrival badge switches on every output. Shopee icon switches on IG Story & FB Post only. Leave off for dark KV colors, where the default white logos already stand out.</p>
           </div>
 
           <div class="form-row two-field-row">
@@ -99,6 +100,30 @@
                 Load Image
               </button>
             </div>
+          </div>
+
+          <div class="form-row">
+            <label>SKU Background</label>
+            <div class="bg-picker span-wide">
+              <button type="button" id="bgPrevButton" class="bg-arrow-button" aria-label="Previous SKU background">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+              <div class="bg-picker-preview">
+                <div class="bg-swatch is-empty" id="bgSwatch" aria-hidden="true"></div>
+                <div class="bg-picker-meta">
+                  <span id="bgName">None</span>
+                  <span class="bg-count" id="bgCount"></span>
+                </div>
+              </div>
+              <button type="button" id="bgNextButton" class="bg-arrow-button" aria-label="Next SKU background">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9 6l6 6-6 6" />
+                </svg>
+              </button>
+            </div>
+            <p class="field-hint">Only shows through transparent SKU photos. Optional — leave on “None” to ignore.</p>
           </div>
 
           <div class="form-row">

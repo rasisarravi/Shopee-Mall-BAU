@@ -50,10 +50,13 @@ Opening `index.html` directly from the file system may block canvas image export
 - All asset paths are relative.
 - Template options are `Mall BAU` and `Mall BAU New Arrival`.
 - Turn on `Hide white logo container` to use the no-container Template 2 overlays.
-- Turn on `Orange icon for IG Story & FB Post` when the external Shopee logo needs to stay visible on light KV colors.
+- Turn on `Colored logos for light KV colors` when the KV color is light. The "NEW ARRIVAL" badge (Mall BAU New Arrival template) switches to its colored version on all five output formats; the Shopee icon switches to its colored version on IG Story and FB Post only, since that's the only pair where the icon sits directly on the KV color. Leave it off on dark KV colors, where the default white logos already stand out. This is a manual choice — the tool doesn't detect light vs. dark for you.
 - Enter an image hash or image link, then click `Load Image` to place that image into the SKU area.
 - Uploaded SKU images can be repositioned by dragging them inside each preview.
 - SKU images can be zoomed per output from the preview controls.
+- Use the arrows next to `SKU Background` to pick a scene backdrop (or leave it on `None`). The chosen background applies to every output format, but its position/zoom is adjusted per format since box sizes differ.
+- The background only shows through a transparent-background SKU photo (e.g. a background-removed PNG). A fully opaque SKU photo (e.g. a plain JPG) will simply cover it, so the background feature is optional either way.
+- When a background is selected, each preview card shows a small `SKU | BG` switch. It picks which layer the canvas drag and the zoom slider control.
 - The KSP input is limited to 50 characters.
 - KSP text color can be changed with the color picker or hex field.
 - The output formats are Category Banner, Top Module Banner, IG Story, FB Post, and Banner Card.

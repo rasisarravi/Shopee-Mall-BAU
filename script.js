@@ -7,6 +7,7 @@ const NEW_ARRIVAL_OVERLAY_BASE = "assets/new-arrival/overlays/";
 const NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE =
   "assets/new-arrival/overlays-no-logo-container/";
 const ORANGE_SHOPEE_LOGO_URL = "assets/logos/Shopee-Logo-Vertical-Orange-icon.png";
+const NEW_ARRIVAL_LOGO_COLOR_URL = "assets/logos/New-Arrival-Logo-Color.png";
 const EXPORT_MAX_BYTES = 250 * 1000;
 const EXPORT_TARGET_BYTES = 248 * 1000;
 const EXPORT_TYPE = "image/png";
@@ -17,10 +18,43 @@ const LOSSY_EXPORT_FORMATS = [
 const DETAIL_LIMIT_SCALES = [0.85, 0.72, 0.6, 0.5, 0.42, 0.35, 0.28, 0.22, 0.16, 0.1, 0.06];
 const SIZE_LIMITED_OUTPUTS = new Set(["category-banner", "top-module-banner", "banner-card"]);
 const EXTERNAL_SHOPEE_LOGO_OUTPUTS = new Set(["ig-story", "fb-post"]);
-const SKU_ZOOM_MIN = 1;
+const SKU_ZOOM_MIN = 0.1;
 const SKU_ZOOM_MAX = 2.5;
 const SKU_ZOOM_DEFAULT = 1;
 const KSP_MAX_CHARACTERS = 50;
+const SKU_BACKGROUND_BASE = "assets/sku-backgrounds/";
+const SKU_BACKGROUNDS = [
+  { id: "beauty", label: "Beauty", src: `${SKU_BACKGROUND_BASE}beauty.png` },
+  { id: "beauty-2", label: "Beauty 2", src: `${SKU_BACKGROUND_BASE}beauty-2.png` },
+  { id: "beauty-3", label: "Beauty 3", src: `${SKU_BACKGROUND_BASE}beauty-3.png` },
+  {
+    id: "beauty-flat-lay-1",
+    label: "Beauty Flat Lay 1",
+    src: `${SKU_BACKGROUND_BASE}beauty-flat-lay-1.png`,
+  },
+  {
+    id: "beauty-flat-lay-2",
+    label: "Beauty Flat Lay 2",
+    src: `${SKU_BACKGROUND_BASE}beauty-flat-lay-2.png`,
+  },
+  {
+    id: "generic-flat-lay",
+    label: "Generic Flat Lay",
+    src: `${SKU_BACKGROUND_BASE}generic-flat-lay.png`,
+  },
+  {
+    id: "generic-podium",
+    label: "Generic Podium",
+    src: `${SKU_BACKGROUND_BASE}generic-podium.png`,
+  },
+  { id: "groceries", label: "Groceries", src: `${SKU_BACKGROUND_BASE}groceries.png` },
+  { id: "home-living", label: "Home & Living", src: `${SKU_BACKGROUND_BASE}home-living.png` },
+  {
+    id: "home-living-2",
+    label: "Home & Living 2",
+    src: `${SKU_BACKGROUND_BASE}home-living-2.png`,
+  },
+];
 
 const outputMeta = {
   "category-banner": {
@@ -96,6 +130,26 @@ const externalShopeeLogoClearBoxes = {
   "fb-post": { x: 34, y: 31, width: 82, height: 92 },
 };
 
+// Where the "NEW ARRIVAL" badge sits within the Mall BAU New Arrival overlay,
+// measured directly off the overlay art at each format's canvas resolution.
+// Unlike the Shopee icon swap (IG Story / FB Post only), this applies to
+// every output format since the New Arrival badge appears on all of them.
+const newArrivalLogoColorBoxes = {
+  "category-banner": { x: 101, y: 40, width: 291, height: 53 },
+  "top-module-banner": { x: 28, y: 55, width: 244, height: 45 },
+  "ig-story": { x: 273, y: 350, width: 534, height: 93 },
+  "fb-post": { x: 125, y: 166, width: 368, height: 65 },
+  "banner-card": { x: 100, y: 84, width: 331, height: 59 },
+};
+
+const newArrivalLogoColorClearBoxes = {
+  "category-banner": { x: 93, y: 32, width: 307, height: 69 },
+  "top-module-banner": { x: 18, y: 45, width: 264, height: 65 },
+  "ig-story": { x: 263, y: 340, width: 554, height: 113 },
+  "fb-post": { x: 117, y: 158, width: 384, height: 81 },
+  "banner-card": { x: 94, y: 78, width: 343, height: 71 },
+};
+
 const state = {
   template: "Mall BAU",
   brandLogoUrl: "",
@@ -109,10 +163,18 @@ const state = {
   outputs: new Set(Object.keys(outputMeta)),
   skuPositions: {},
   skuZooms: {},
+  skuBackgroundIndex: -1, // -1 = "None"; 0..N-1 indexes into SKU_BACKGROUNDS
+  skuBackgroundPositions: {},
+  skuBackgroundZooms: {},
   hue: 166,
   saturation: 0.48,
   value: 0.37,
 };
+
+// Per-output, UI-only: which layer (sku or background) the canvas drag +
+// zoom slider currently controls. Not part of `state` because it never
+// needs to be exported or persisted, only reflected in the current render.
+const activeLayerByOutput = {};
 
 const els = {
   templateSelect: document.querySelector("#templateSelect"),
@@ -125,6 +187,11 @@ const els = {
   skuFileName: document.querySelector("#skuFileName"),
   skuLink: document.querySelector("#skuLink"),
   loadSkuLinkButton: document.querySelector("#loadSkuLinkButton"),
+  bgPrevButton: document.querySelector("#bgPrevButton"),
+  bgNextButton: document.querySelector("#bgNextButton"),
+  bgSwatch: document.querySelector("#bgSwatch"),
+  bgName: document.querySelector("#bgName"),
+  bgCount: document.querySelector("#bgCount"),
   kspInput: document.querySelector("#kspInput"),
   kspCount: document.querySelector("#kspCount"),
   kspColorInput: document.querySelector("#kspColorInput"),
@@ -417,34 +484,26 @@ function roundRect(ctx, x, y, width, height, radius) {
 }
 
 function getCoverMetrics(image, width, height, zoom = SKU_ZOOM_DEFAULT) {
+  // Base scale is the "cover" fit (fills the box completely at zoom 1).
+  // Zoom can go below 1 to shrink the image smaller than the box, or above
+  // 1 to zoom in further — it's a free multiplier on top of cover-fit, not
+  // clamped to "must always cover the box".
   const scale =
     Math.max(width / image.naturalWidth, height / image.naturalHeight) *
     clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
   const drawWidth = image.naturalWidth * scale;
   const drawHeight = image.naturalHeight * scale;
-  return {
-    drawWidth,
-    drawHeight,
-    overflowX: Math.max(0, drawWidth - width),
-    overflowY: Math.max(0, drawHeight - height),
-  };
+  return { drawWidth, drawHeight };
 }
 
-function drawCover(
-  ctx,
-  image,
-  x,
-  y,
-  width,
-  height,
-  alignX = 0.5,
-  alignY = 0.5,
-  zoom = SKU_ZOOM_DEFAULT,
-) {
+// offsetX/offsetY are raw pixel shifts away from dead-center within the box
+// (not a 0-1 alignment fraction), so dragging can move the image freely in
+// any direction by any amount, regardless of its size relative to the box.
+function drawCover(ctx, image, x, y, width, height, offsetX = 0, offsetY = 0, zoom = SKU_ZOOM_DEFAULT) {
   if (!image) return;
   const { drawWidth, drawHeight } = getCoverMetrics(image, width, height, zoom);
-  const dx = x + (width - drawWidth) * alignX;
-  const dy = y + (height - drawHeight) * alignY;
+  const dx = x + (width - drawWidth) / 2 + offsetX;
+  const dy = y + (height - drawHeight) / 2 + offsetY;
   ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
 }
 
@@ -751,21 +810,38 @@ function drawBackground(ctx, format) {
   return layout;
 }
 
-function getSkuPosition(outputId, layout = null) {
+// Positions are stored as raw pixel offsets from dead-center (not a 0-1
+// alignment fraction), so an image can be dragged freely by any amount in
+// any direction regardless of its size relative to the box. When nothing
+// has been saved yet, fall back to a per-format default offset derived
+// from the old art-directed alignment bias (productAlign), evaluated at
+// the default zoom so the initial framing looks the same as before.
+function getDefaultLayerOffset(image, layout, productAlign) {
+  if (!image) return { x: 0, y: 0 };
+  const { drawWidth, drawHeight } = getCoverMetrics(
+    image,
+    layout.product.width,
+    layout.product.height,
+    SKU_ZOOM_DEFAULT,
+  );
+  return {
+    x: (layout.product.width - drawWidth) * (productAlign[0] - 0.5),
+    y: (layout.product.height - drawHeight) * (productAlign[1] - 0.5),
+  };
+}
+
+function getSkuPosition(outputId, layout = null, image = null) {
   const savedPosition = state.skuPositions[outputId];
   if (savedPosition) return savedPosition;
 
   const currentLayout = layout || getLayout(outputMeta[outputId]);
-  return {
-    x: currentLayout.productAlign[0],
-    y: currentLayout.productAlign[1],
-  };
+  return getDefaultLayerOffset(image, currentLayout, currentLayout.productAlign);
 }
 
 function setSkuPosition(outputId, position) {
   state.skuPositions[outputId] = {
-    x: clamp(position.x, 0, 1),
-    y: clamp(position.y, 0, 1),
+    x: Number.isFinite(position.x) ? position.x : 0,
+    y: Number.isFinite(position.y) ? position.y : 0,
   };
 }
 
@@ -775,6 +851,84 @@ function getSkuZoom(outputId) {
 
 function setSkuZoom(outputId, zoom) {
   state.skuZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
+}
+
+function hasSkuBackground() {
+  return state.skuBackgroundIndex >= 0 && state.skuBackgroundIndex < SKU_BACKGROUNDS.length;
+}
+
+function getSkuBackgroundSrc() {
+  return hasSkuBackground() ? SKU_BACKGROUNDS[state.skuBackgroundIndex].src : "";
+}
+
+function getSkuBackgroundLabel() {
+  return hasSkuBackground() ? SKU_BACKGROUNDS[state.skuBackgroundIndex].label : "None";
+}
+
+// Selection cycles through "None" plus every background, wrapping in both
+// directions: -1 (None), 0, 1, ... N-1, back to -1.
+function cycleSkuBackground(direction) {
+  const total = SKU_BACKGROUNDS.length + 1;
+  const currentSlot = state.skuBackgroundIndex + 1;
+  const nextSlot = (currentSlot + direction + total) % total;
+  state.skuBackgroundIndex = nextSlot - 1;
+  if (!hasSkuBackground()) resetActiveLayers();
+}
+
+function getSkuBackgroundPosition(outputId, layout = null, image = null) {
+  const savedPosition = state.skuBackgroundPositions[outputId];
+  if (savedPosition) return savedPosition;
+
+  const currentLayout = layout || getLayout(outputMeta[outputId]);
+  return getDefaultLayerOffset(image, currentLayout, currentLayout.productAlign);
+}
+
+function setSkuBackgroundPosition(outputId, position) {
+  state.skuBackgroundPositions[outputId] = {
+    x: Number.isFinite(position.x) ? position.x : 0,
+    y: Number.isFinite(position.y) ? position.y : 0,
+  };
+}
+
+function getSkuBackgroundZoom(outputId) {
+  return state.skuBackgroundZooms[outputId] || SKU_ZOOM_DEFAULT;
+}
+
+function setSkuBackgroundZoom(outputId, zoom) {
+  state.skuBackgroundZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
+}
+
+// Registry so drag/zoom code can operate on "whichever layer is active"
+// without branching everywhere.
+const skuLayers = {
+  sku: {
+    getImageUrl: () => state.skuImageUrl,
+    getPosition: getSkuPosition,
+    setPosition: setSkuPosition,
+    getZoom: getSkuZoom,
+    setZoom: setSkuZoom,
+  },
+  background: {
+    getImageUrl: () => getSkuBackgroundSrc(),
+    getPosition: getSkuBackgroundPosition,
+    setPosition: setSkuBackgroundPosition,
+    getZoom: getSkuBackgroundZoom,
+    setZoom: setSkuBackgroundZoom,
+  },
+};
+
+function getActiveLayer(outputId) {
+  return activeLayerByOutput[outputId] === "background" ? "background" : "sku";
+}
+
+function setActiveLayer(outputId, layerKey) {
+  activeLayerByOutput[outputId] = layerKey === "background" ? "background" : "sku";
+}
+
+function resetActiveLayers() {
+  Object.keys(activeLayerByOutput).forEach((outputId) => {
+    activeLayerByOutput[outputId] = "sku";
+  });
 }
 
 function getOverlaySrc(format) {
@@ -803,12 +957,21 @@ async function drawOutput(outputId, canvas, options = {}) {
 
   const shouldUseOrangeShopeeLogo =
     state.useOrangeShopeeLogo && EXTERNAL_SHOPEE_LOGO_OUTPUTS.has(outputId);
-  const [brandLogo, skuImage, overlay, orangeShopeeLogo] = await Promise.all([
-    loadImage(state.brandLogoUrl),
-    photoOverride ? Promise.resolve(null) : loadImage(state.skuImageUrl),
-    loadImage(getOverlaySrc(format)),
-    loadImage(shouldUseOrangeShopeeLogo ? ORANGE_SHOPEE_LOGO_URL : ""),
-  ]);
+  // Applies on every format (not just IG Story / FB Post) since the New
+  // Arrival badge shows up on all of them, unlike the Shopee icon swap.
+  const shouldUseColorNewArrivalLogo =
+    state.useOrangeShopeeLogo &&
+    state.template === "Mall BAU New Arrival" &&
+    Boolean(newArrivalLogoColorBoxes[outputId]);
+  const [brandLogo, skuImage, overlay, orangeShopeeLogo, backgroundImage, newArrivalLogoColor] =
+    await Promise.all([
+      loadImage(state.brandLogoUrl),
+      photoOverride ? Promise.resolve(null) : loadImage(state.skuImageUrl),
+      loadImage(getOverlaySrc(format)),
+      loadImage(shouldUseOrangeShopeeLogo ? ORANGE_SHOPEE_LOGO_URL : ""),
+      photoOverride ? Promise.resolve(null) : loadImage(getSkuBackgroundSrc()),
+      loadImage(shouldUseColorNewArrivalLogo ? NEW_ARRIVAL_LOGO_COLOR_URL : ""),
+    ]);
 
   ctx.clearRect(0, 0, format.width, format.height);
   const layout = drawBackground(ctx, format);
@@ -829,7 +992,24 @@ async function drawOutput(outputId, canvas, options = {}) {
       layout.product.height,
     );
   } else {
-    const skuPosition = getSkuPosition(outputId, layout);
+    if (backgroundImage) {
+      // Drawn first so a transparent-background SKU photo shows it through;
+      // an opaque SKU photo will simply cover it entirely.
+      const bgPosition = getSkuBackgroundPosition(outputId, layout, backgroundImage);
+      const bgZoom = getSkuBackgroundZoom(outputId);
+      drawCover(
+        ctx,
+        backgroundImage,
+        layout.product.x,
+        layout.product.y,
+        layout.product.width,
+        layout.product.height,
+        bgPosition.x,
+        bgPosition.y,
+        bgZoom,
+      );
+    }
+    const skuPosition = getSkuPosition(outputId, layout, skuImage);
     const skuZoom = getSkuZoom(outputId);
     drawCover(
       ctx,
@@ -852,12 +1032,26 @@ async function drawOutput(outputId, canvas, options = {}) {
     const logoBox = externalShopeeLogoBoxes[outputId];
     ctx.fillStyle = state.kvColor;
     ctx.fillRect(clearBox.x, clearBox.y, clearBox.width, clearBox.height);
-    ctx.drawImage(
-      orangeShopeeLogo,
-      logoBox.x,
-      logoBox.y,
-      logoBox.width,
-      logoBox.height,
+    // drawContain (not a stretch) keeps the asset's own aspect ratio intact,
+    // fitting and centering it inside the box instead of distorting it.
+    drawContain(ctx, orangeShopeeLogo, logoBox.x, logoBox.y, logoBox.width, logoBox.height);
+  }
+  if (shouldUseColorNewArrivalLogo && newArrivalLogoColor) {
+    // Same clear-then-redraw technique as the Shopee logo swap above: the
+    // white "NEW ARRIVAL" badge is baked into the overlay art, so we paint
+    // over it with the flat KV color, then draw the colored version at the
+    // exact same spot — position/size never change, only the asset does.
+    const naClearBox = newArrivalLogoColorClearBoxes[outputId];
+    const naLogoBox = newArrivalLogoColorBoxes[outputId];
+    ctx.fillStyle = state.kvColor;
+    ctx.fillRect(naClearBox.x, naClearBox.y, naClearBox.width, naClearBox.height);
+    drawContain(
+      ctx,
+      newArrivalLogoColor,
+      naLogoBox.x,
+      naLogoBox.y,
+      naLogoBox.width,
+      naLogoBox.height,
     );
   }
   drawBrandLogo(ctx, brandLogo, layout.logo);
@@ -885,22 +1079,19 @@ function pointInsideBox(point, box) {
   );
 }
 
-function updateSkuPositionFromDrag(outputId, image, deltaX, deltaY) {
+function updateLayerPositionFromDrag(outputId, layerKey, image, deltaX, deltaY) {
   const format = outputMeta[outputId];
   const layout = getLayout(format);
-  const position = getSkuPosition(outputId, layout);
-  const zoom = getSkuZoom(outputId);
-  const { overflowX, overflowY } = getCoverMetrics(
-    image,
-    layout.product.width,
-    layout.product.height,
-    zoom,
-  );
+  const layer = skuLayers[layerKey];
+  const position = layer.getPosition(outputId, layout, image);
 
-  const nextPosition = { ...position };
-  if (overflowX > 0.5) nextPosition.x -= deltaX / overflowX;
-  if (overflowY > 0.5) nextPosition.y -= deltaY / overflowY;
-  setSkuPosition(outputId, nextPosition);
+  // Pixel-for-pixel drag: the image moves exactly as far as the cursor,
+  // with no clamping and no dependence on the image's size relative to
+  // the box, so it can be repositioned freely at any zoom level.
+  layer.setPosition(outputId, {
+    x: position.x + deltaX,
+    y: position.y + deltaY,
+  });
 }
 
 function requestCanvasRedraw(outputId, canvas) {
@@ -926,7 +1117,8 @@ function bindSkuDrag(canvas, outputId) {
     const point = canvasPointFromEvent(canvas, event);
     if (!pointInsideBox(point, layout.product)) return;
 
-    const image = await loadImage(state.skuImageUrl);
+    const layerKey = getActiveLayer(outputId);
+    const image = await loadImage(skuLayers[layerKey].getImageUrl());
     if (!image) return;
 
     event.preventDefault();
@@ -935,6 +1127,7 @@ function bindSkuDrag(canvas, outputId) {
     skuDrag = {
       canvas,
       outputId,
+      layerKey,
       pointerId: event.pointerId,
       image,
       lastPoint: point,
@@ -951,7 +1144,7 @@ function bindSkuDrag(canvas, outputId) {
     const deltaY = point.y - skuDrag.lastPoint.y;
     skuDrag.lastPoint = point;
 
-    updateSkuPositionFromDrag(outputId, skuDrag.image, deltaX, deltaY);
+    updateLayerPositionFromDrag(outputId, skuDrag.layerKey, skuDrag.image, deltaX, deltaY);
     requestCanvasRedraw(outputId, canvas);
   });
 
@@ -982,22 +1175,60 @@ function createPreviewBlock(outputId) {
   const actions = document.createElement("div");
   actions.className = "preview-actions";
 
+  const activeLayerKey = getActiveLayer(outputId);
+  const activeLayer = skuLayers[activeLayerKey];
+  const isBackgroundActive = activeLayerKey === "background";
+
+  if (hasSkuBackground()) {
+    const layerSwitch = document.createElement("div");
+    layerSwitch.className = "layer-switch";
+    layerSwitch.setAttribute("role", "group");
+    layerSwitch.setAttribute("aria-label", `${format.title} move target`);
+
+    [
+      { key: "sku", label: "SKU" },
+      { key: "background", label: "BG" },
+    ].forEach(({ key, label }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "layer-switch-btn";
+      button.dataset.layer = key;
+      button.textContent = label;
+      const isActive = key === activeLayerKey;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+      layerSwitch.append(button);
+    });
+
+    layerSwitch.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-layer]");
+      if (!button || button.classList.contains("is-active")) return;
+      setActiveLayer(outputId, button.dataset.layer);
+      renderPreviews();
+    });
+
+    actions.append(layerSwitch);
+  }
+
   const zoomControl = document.createElement("label");
   zoomControl.className = "zoom-control";
   const zoomLabel = document.createElement("span");
-  zoomLabel.textContent = "SKU Zoom";
+  zoomLabel.textContent = isBackgroundActive ? "Background Zoom" : "SKU Zoom";
   const zoomInput = document.createElement("input");
   zoomInput.type = "range";
   zoomInput.min = String(SKU_ZOOM_MIN * 100);
   zoomInput.max = String(SKU_ZOOM_MAX * 100);
   zoomInput.step = "5";
-  zoomInput.value = String(Math.round(getSkuZoom(outputId) * 100));
-  zoomInput.setAttribute("aria-label", `${format.title} SKU zoom`);
+  zoomInput.value = String(Math.round(activeLayer.getZoom(outputId) * 100));
+  zoomInput.setAttribute(
+    "aria-label",
+    `${format.title} ${isBackgroundActive ? "background" : "SKU"} zoom`,
+  );
   const zoomValue = document.createElement("span");
   zoomValue.className = "zoom-value";
   zoomValue.textContent = `${zoomInput.value}%`;
   zoomInput.addEventListener("input", () => {
-    setSkuZoom(outputId, Number(zoomInput.value) / 100);
+    activeLayer.setZoom(outputId, Number(zoomInput.value) / 100);
     zoomValue.textContent = `${zoomInput.value}%`;
     if (canvas) requestCanvasRedraw(outputId, canvas);
   });
@@ -1016,7 +1247,8 @@ function createPreviewBlock(outputId) {
   shell.className = "canvas-shell";
   canvas = document.createElement("canvas");
   canvas.className = "asset-canvas";
-  if (state.skuImageUrl) canvas.classList.add("can-drag");
+  const activeLayerHasImage = isBackgroundActive ? hasSkuBackground() : Boolean(state.skuImageUrl);
+  if (activeLayerHasImage) canvas.classList.add("can-drag");
   canvas.dataset.output = outputId;
   canvas.setAttribute("aria-label", `${format.title} preview`);
   bindSkuDrag(canvas, outputId);
@@ -1296,7 +1528,10 @@ const PHOTO_SOFTEN_QUALITIES = [0.92, 0.82, 0.7, 0.58, 0.46, 0.34, 0.24, 0.16, 0
 async function createPhotoLayer(outputId, quality) {
   const format = outputMeta[outputId];
   const layout = getLayout(format);
-  const skuImage = await loadImage(state.skuImageUrl);
+  const [skuImage, backgroundImage] = await Promise.all([
+    loadImage(state.skuImageUrl),
+    loadImage(getSkuBackgroundSrc()),
+  ]);
 
   const photoCanvas = document.createElement("canvas");
   photoCanvas.width = Math.max(1, Math.round(layout.product.width));
@@ -1307,8 +1542,24 @@ async function createPhotoLayer(outputId, quality) {
   photoCtx.fillStyle = "#FFFFFF";
   photoCtx.fillRect(0, 0, photoCanvas.width, photoCanvas.height);
 
+  if (backgroundImage) {
+    const bgPosition = getSkuBackgroundPosition(outputId, layout, backgroundImage);
+    const bgZoom = getSkuBackgroundZoom(outputId);
+    drawCover(
+      photoCtx,
+      backgroundImage,
+      0,
+      0,
+      photoCanvas.width,
+      photoCanvas.height,
+      bgPosition.x,
+      bgPosition.y,
+      bgZoom,
+    );
+  }
+
   if (skuImage) {
-    const skuPosition = getSkuPosition(outputId, layout);
+    const skuPosition = getSkuPosition(outputId, layout, skuImage);
     const skuZoom = getSkuZoom(outputId);
     drawCover(
       photoCtx,
@@ -1729,6 +1980,30 @@ els.skuLink.addEventListener("keydown", (event) => {
 
 els.loadSkuLinkButton.addEventListener("click", loadSkuImageFromInput);
 
+function renderBackgroundPicker() {
+  const hasBg = hasSkuBackground();
+  if (els.bgSwatch) {
+    els.bgSwatch.style.backgroundImage = hasBg ? `url("${getSkuBackgroundSrc()}")` : "";
+    els.bgSwatch.classList.toggle("is-empty", !hasBg);
+  }
+  if (els.bgName) els.bgName.textContent = getSkuBackgroundLabel();
+  if (els.bgCount) {
+    els.bgCount.textContent = hasBg ? `${state.skuBackgroundIndex + 1}/${SKU_BACKGROUNDS.length}` : "";
+  }
+}
+
+els.bgPrevButton?.addEventListener("click", () => {
+  cycleSkuBackground(-1);
+  renderBackgroundPicker();
+  renderPreviews();
+});
+
+els.bgNextButton?.addEventListener("click", () => {
+  cycleSkuBackground(1);
+  renderBackgroundPicker();
+  renderPreviews();
+});
+
 els.kspInput.addEventListener("input", (event) => {
   const value = normalizedKsp(event.target.value);
   if (value !== event.target.value) event.target.value = value;
@@ -1844,4 +2119,5 @@ syncKspCount();
 drawColorCanvas();
 setKspColor(state.kspColor);
 setColor(state.kvColor);
+renderBackgroundPicker();
 initTheme();
