@@ -37,6 +37,51 @@
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
       </svg>
     </button>
+    <details class="bulk-panel" id="bulkPanel">
+      <summary class="bulk-panel-summary">
+        <span class="bulk-panel-summary-text">
+          <span class="bulk-panel-title">Bulk generate from CSV</span>
+          <span class="bulk-panel-subtitle">Batch-create assets for many brands at once — the single-image editor below is unaffected.</span>
+        </span>
+      </summary>
+      <div class="bulk-panel-body">
+        <div class="bulk-upload-row">
+          <input id="bulkCsvInput" type="file" accept=".csv,text/csv" />
+          <label class="upload-box bulk-upload-box" for="bulkCsvInput">
+            <span id="bulkCsvFileName">Upload CSV</span>
+          </label>
+          <button type="button" class="field-action-button" id="bulkTemplateButton">
+            Download template
+          </button>
+        </div>
+        <p class="field-hint">
+          Columns: <code>KSP</code>, <code>Brand Logo</code>, <code>SKU Image</code>. Logo and SKU
+          accept an image hash or a direct link, same as the single editor above.
+        </p>
+
+        <div class="bulk-defaults-row">
+          <span class="bulk-defaults-label">Default outputs for new rows</span>
+          <div class="chip-row" id="bulkDefaultOutputs">
+            <button type="button" class="chip-button" data-output="category-banner">Category Banner</button>
+            <button type="button" class="chip-button" data-output="top-module-banner">Top Module Banner</button>
+            <button type="button" class="chip-button" data-output="ig-story">IG Story</button>
+            <button type="button" class="chip-button" data-output="fb-post">FB Post</button>
+            <button type="button" class="chip-button" data-output="banner-card">Banner Card</button>
+          </div>
+        </div>
+
+        <div class="bulk-rows" id="bulkRows"></div>
+        <p class="bulk-empty-state" id="bulkEmptyState">Upload a CSV to see rows here.</p>
+
+        <div class="bulk-footer">
+          <span class="bulk-summary" id="bulkSummary"></span>
+          <button type="button" class="generate-button bulk-generate-button" id="bulkGenerateButton" disabled>
+            Generate all
+          </button>
+        </div>
+      </div>
+    </details>
+
     <main class="app-shell" aria-label="Campaign creative generator prototype">
       <aside class="control-panel" aria-label="Creative inputs">
         <div class="panel-heading">
@@ -231,6 +276,10 @@
             <span class="status-pill" id="statusPill">Ready</span>
             <button type="button" id="downloadAllButton">Download ZIP</button>
           </div>
+        </div>
+        <div class="stage-banner" id="stageBanner" hidden>
+          <span id="stageBannerText"></span>
+          <button type="button" id="stageBannerExit">Back to main editor</button>
         </div>
         <div class="preview-list" id="previewList"></div>
       </section>

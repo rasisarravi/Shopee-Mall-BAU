@@ -64,3 +64,15 @@ Opening `index.html` directly from the file system may block canvas image export
 - IG Story and FB Post export as full-size PNG because they are not internal-platform assets.
 - For size-limited outputs, the app keeps PNG when it is already under the limit. Heavier photo-based assets are automatically exported as JPG (quality reduced, then resolution reduced if needed) to keep the file size below 250 KB. WebP is never used since the downstream internal system only supports PNG and JPG.
 - The app can download a single asset or a ZIP containing all selected outputs.
+
+## Bulk Generate From CSV
+
+The `Bulk generate from CSV` panel above the main editor batch-creates assets for many brands at once, without touching the single-image editor below it.
+
+- Click `Download template` for a starter CSV. Columns are `KSP`, `Brand Logo`, `SKU Image`. Brand Logo and SKU Image accept either a Shopee image hash or a direct image link, same as the `Image Hash / Image Link` field in the single editor.
+- After uploading, each row defaults to whatever is selected under `Default outputs for new rows` (Category Banner and Banner Card, out of the box, to keep batch runs fast). Every row's output selection can be overridden individually with its own chips.
+- Click `Preview & edit` on a row to load that row into the main editor — the exact same sidebar (Brand Logo, SKU Image, KSP, output selection) and preview stage used for a single brand, not a separate simplified view. Fetching the row's logo/SKU happens once and is cached, so reopening a row is instant. A banner above the preview stage shows which row you're editing, with a `Back to main editor` button to return to the single-brand editor. Only one row can be open at a time; opening another row closes the previous one.
+- While a row is open, Template, KV Color, toggles, and SKU Background stay whatever the sidebar has configured (shared across every row), but Brand Logo, SKU Image, KSP text, output selection, and each output's drag position/zoom belong to that row — editing them there edits that row, not the single-brand editor.
+- `Generate all` reuses the current shared settings for every row and keeps each row's own edits, including anything changed while previewing it. Rows that were never opened export with their default centered framing.
+- Rows with a blank cell simply skip that field (no logo, or no SKU image, for that row). Rows whose image fails to load are marked and skipped; the rest of the batch still completes.
+- Results download as one ZIP with a `row-1/`, `row-2/`, ... subfolder per brand.

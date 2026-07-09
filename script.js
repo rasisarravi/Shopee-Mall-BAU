@@ -153,9 +153,11 @@ const newArrivalLogoColorClearBoxes = {
 const state = {
   template: "Mall BAU",
   brandLogoUrl: "",
+  brandLogoLabel: "Upload",
   hideLogoContainer: false,
   useOrangeShopeeLogo: false,
   skuImageUrl: DEFAULT_SKU_IMAGE,
+  skuImageLabel: "Upload",
   skuLink: "",
   ksp: "EXCLUSIVE LAUNCH DISKON 25%",
   kspColor: "#FFFFFF",
@@ -166,15 +168,15 @@ const state = {
   skuBackgroundIndex: -1, // -1 = "None"; 0..N-1 indexes into SKU_BACKGROUNDS
   skuBackgroundPositions: {},
   skuBackgroundZooms: {},
+  // Per-output, UI-only: which layer (sku or background) the canvas drag +
+  // zoom slider currently controls. Every render "context" (the single
+  // editor's `state`, or a bulk row acting as its own context) carries its
+  // own copy of this so they never interfere with each other.
+  activeLayerByOutput: {},
   hue: 166,
   saturation: 0.48,
   value: 0.37,
 };
-
-// Per-output, UI-only: which layer (sku or background) the canvas drag +
-// zoom slider currently controls. Not part of `state` because it never
-// needs to be exported or persisted, only reflected in the current render.
-const activeLayerByOutput = {};
 
 const els = {
   templateSelect: document.querySelector("#templateSelect"),
@@ -208,7 +210,19 @@ const els = {
   downloadAllButton: document.querySelector("#downloadAllButton"),
   previewList: document.querySelector("#previewList"),
   statusPill: document.querySelector("#statusPill"),
+  stageBanner: document.querySelector("#stageBanner"),
+  stageBannerText: document.querySelector("#stageBannerText"),
+  stageBannerExit: document.querySelector("#stageBannerExit"),
   themeToggle: document.querySelector("#themeToggle"),
+  bulkPanel: document.querySelector("#bulkPanel"),
+  bulkCsvInput: document.querySelector("#bulkCsvInput"),
+  bulkCsvFileName: document.querySelector("#bulkCsvFileName"),
+  bulkTemplateButton: document.querySelector("#bulkTemplateButton"),
+  bulkDefaultOutputs: document.querySelector("#bulkDefaultOutputs"),
+  bulkRows: document.querySelector("#bulkRows"),
+  bulkEmptyState: document.querySelector("#bulkEmptyState"),
+  bulkSummary: document.querySelector("#bulkSummary"),
+  bulkGenerateButton: document.querySelector("#bulkGenerateButton"),
 };
 
 const swatches = [
@@ -226,6 +240,22 @@ const zipEncoder = new TextEncoder();
 let fontReady;
 let renderVersion = 0;
 let skuDrag = null;
+// null = the main editor is showing/editing the single-brand `state`.
+// When set, it's a bulk-CSV row object — the same shared render pipeline
+// (createPreviewBlock/drawOutput/downloadCanvas) and every sidebar field
+// then read/write that row instead, so it becomes a full editor for that
+// row without any separate/duplicated UI.
+let activeRow = null;
+
+function editingContext() {
+  return activeRow || state;
+}
+
+function editingOutputs() {
+  return activeRow
+    ? BULK_OUTPUT_IDS.filter((outputId) => activeRow.outputs.has(outputId))
+    : selectedOutputs();
+}
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -417,15 +447,17 @@ async function fetchImageObjectUrl(src) {
 }
 
 function setSkuImageUrl(url, labelText) {
-  if (state.skuImageUrl?.startsWith("blob:") && state.skuImageUrl !== url) {
-    imageCache.delete(state.skuImageUrl);
-    URL.revokeObjectURL(state.skuImageUrl);
+  const context = editingContext();
+  if (context.skuImageUrl?.startsWith("blob:") && context.skuImageUrl !== url) {
+    imageCache.delete(context.skuImageUrl);
+    URL.revokeObjectURL(context.skuImageUrl);
   }
 
-  state.skuImageUrl = url;
-  state.skuPositions = {};
-  state.skuZooms = {};
-  els.skuFileName.textContent = labelText || "Linked image";
+  context.skuImageUrl = url;
+  context.skuImageLabel = labelText || "Linked image";
+  context.skuPositions = {};
+  context.skuZooms = {};
+  els.skuFileName.textContent = context.skuImageLabel;
 }
 
 async function loadSkuImageFromInput() {
@@ -830,27 +862,32 @@ function getDefaultLayerOffset(image, layout, productAlign) {
   };
 }
 
-function getSkuPosition(outputId, layout = null, image = null) {
-  const savedPosition = state.skuPositions[outputId];
+// `context` defaults to the single editor's global `state`, so every
+// existing call site keeps working unchanged. A bulk row can also act as
+// its own context (it has the same shaped skuPositions/skuZooms/ksp/etc.
+// fields), which is what lets each row get independent drag/zoom editing
+// without disturbing the single editor or any other row.
+function getSkuPosition(outputId, layout = null, image = null, context = state) {
+  const savedPosition = context.skuPositions[outputId];
   if (savedPosition) return savedPosition;
 
   const currentLayout = layout || getLayout(outputMeta[outputId]);
   return getDefaultLayerOffset(image, currentLayout, currentLayout.productAlign);
 }
 
-function setSkuPosition(outputId, position) {
-  state.skuPositions[outputId] = {
+function setSkuPosition(outputId, position, context = state) {
+  context.skuPositions[outputId] = {
     x: Number.isFinite(position.x) ? position.x : 0,
     y: Number.isFinite(position.y) ? position.y : 0,
   };
 }
 
-function getSkuZoom(outputId) {
-  return state.skuZooms[outputId] || SKU_ZOOM_DEFAULT;
+function getSkuZoom(outputId, context = state) {
+  return context.skuZooms[outputId] || SKU_ZOOM_DEFAULT;
 }
 
-function setSkuZoom(outputId, zoom) {
-  state.skuZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
+function setSkuZoom(outputId, zoom, context = state) {
+  context.skuZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
 }
 
 function hasSkuBackground() {
@@ -899,35 +936,39 @@ function setSkuBackgroundZoom(outputId, zoom) {
 }
 
 // Registry so drag/zoom code can operate on "whichever layer is active"
-// without branching everywhere.
-const skuLayers = {
-  sku: {
-    getImageUrl: () => state.skuImageUrl,
-    getPosition: getSkuPosition,
-    setPosition: setSkuPosition,
-    getZoom: getSkuZoom,
-    setZoom: setSkuZoom,
-  },
-  background: {
-    getImageUrl: () => getSkuBackgroundSrc(),
-    getPosition: getSkuBackgroundPosition,
-    setPosition: setSkuBackgroundPosition,
-    getZoom: getSkuBackgroundZoom,
-    setZoom: setSkuBackgroundZoom,
-  },
-};
-
-function getActiveLayer(outputId) {
-  return activeLayerByOutput[outputId] === "background" ? "background" : "sku";
+// without branching everywhere. The background side always reads/writes
+// the global state (it's shared across the whole batch, not per-row); the
+// sku side is bound to whichever context is passed in.
+function getSkuLayers(context = state) {
+  return {
+    sku: {
+      getImageUrl: () => context.skuImageUrl,
+      getPosition: (outputId, layout, image) => getSkuPosition(outputId, layout, image, context),
+      setPosition: (outputId, position) => setSkuPosition(outputId, position, context),
+      getZoom: (outputId) => getSkuZoom(outputId, context),
+      setZoom: (outputId, zoom) => setSkuZoom(outputId, zoom, context),
+    },
+    background: {
+      getImageUrl: () => getSkuBackgroundSrc(),
+      getPosition: getSkuBackgroundPosition,
+      setPosition: setSkuBackgroundPosition,
+      getZoom: getSkuBackgroundZoom,
+      setZoom: setSkuBackgroundZoom,
+    },
+  };
 }
 
-function setActiveLayer(outputId, layerKey) {
-  activeLayerByOutput[outputId] = layerKey === "background" ? "background" : "sku";
+function getActiveLayer(outputId, context = state) {
+  return context.activeLayerByOutput[outputId] === "background" ? "background" : "sku";
 }
 
-function resetActiveLayers() {
-  Object.keys(activeLayerByOutput).forEach((outputId) => {
-    activeLayerByOutput[outputId] = "sku";
+function setActiveLayer(outputId, layerKey, context = state) {
+  context.activeLayerByOutput[outputId] = layerKey === "background" ? "background" : "sku";
+}
+
+function resetActiveLayers(context = state) {
+  Object.keys(context.activeLayerByOutput).forEach((outputId) => {
+    context.activeLayerByOutput[outputId] = "sku";
   });
 }
 
@@ -944,7 +985,7 @@ function getOverlaySrc(format) {
 }
 
 async function drawOutput(outputId, canvas, options = {}) {
-  const { scale = 1, photoOverride = null } = options;
+  const { scale = 1, photoOverride = null, context = state } = options;
   const format = outputMeta[outputId];
   const ctx = canvas.getContext("2d");
   canvas.width = Math.round(format.width * scale);
@@ -965,8 +1006,8 @@ async function drawOutput(outputId, canvas, options = {}) {
     Boolean(newArrivalLogoColorBoxes[outputId]);
   const [brandLogo, skuImage, overlay, orangeShopeeLogo, backgroundImage, newArrivalLogoColor] =
     await Promise.all([
-      loadImage(state.brandLogoUrl),
-      photoOverride ? Promise.resolve(null) : loadImage(state.skuImageUrl),
+      loadImage(context.brandLogoUrl),
+      photoOverride ? Promise.resolve(null) : loadImage(context.skuImageUrl),
       loadImage(getOverlaySrc(format)),
       loadImage(shouldUseOrangeShopeeLogo ? ORANGE_SHOPEE_LOGO_URL : ""),
       photoOverride ? Promise.resolve(null) : loadImage(getSkuBackgroundSrc()),
@@ -1009,8 +1050,8 @@ async function drawOutput(outputId, canvas, options = {}) {
         bgZoom,
       );
     }
-    const skuPosition = getSkuPosition(outputId, layout, skuImage);
-    const skuZoom = getSkuZoom(outputId);
+    const skuPosition = getSkuPosition(outputId, layout, skuImage, context);
+    const skuZoom = getSkuZoom(outputId, context);
     drawCover(
       ctx,
       skuImage,
@@ -1055,7 +1096,7 @@ async function drawOutput(outputId, canvas, options = {}) {
     );
   }
   drawBrandLogo(ctx, brandLogo, layout.logo);
-  drawFittedText(ctx, state.ksp, layout.ksp, {
+  drawFittedText(ctx, context.ksp, layout.ksp, {
     color: state.kspColor,
     maxSize: layout.ksp.maxSize,
     minSize: 10,
@@ -1079,10 +1120,10 @@ function pointInsideBox(point, box) {
   );
 }
 
-function updateLayerPositionFromDrag(outputId, layerKey, image, deltaX, deltaY) {
+function updateLayerPositionFromDrag(outputId, layerKey, image, deltaX, deltaY, context = state) {
   const format = outputMeta[outputId];
   const layout = getLayout(format);
-  const layer = skuLayers[layerKey];
+  const layer = getSkuLayers(context)[layerKey];
   const position = layer.getPosition(outputId, layout, image);
 
   // Pixel-for-pixel drag: the image moves exactly as far as the cursor,
@@ -1094,11 +1135,11 @@ function updateLayerPositionFromDrag(outputId, layerKey, image, deltaX, deltaY) 
   });
 }
 
-function requestCanvasRedraw(outputId, canvas) {
+function requestCanvasRedraw(outputId, canvas, context = state) {
   if (canvas.renderFrame) cancelAnimationFrame(canvas.renderFrame);
   canvas.renderFrame = requestAnimationFrame(() => {
     canvas.renderFrame = 0;
-    drawOutput(outputId, canvas);
+    drawOutput(outputId, canvas, { context });
   });
 }
 
@@ -1109,7 +1150,7 @@ function endSkuDrag(event) {
   setStatus("Ready");
 }
 
-function bindSkuDrag(canvas, outputId) {
+function bindSkuDrag(canvas, outputId, context = state) {
   canvas.addEventListener("pointerdown", async (event) => {
     if (event.button !== 0) return;
 
@@ -1117,8 +1158,8 @@ function bindSkuDrag(canvas, outputId) {
     const point = canvasPointFromEvent(canvas, event);
     if (!pointInsideBox(point, layout.product)) return;
 
-    const layerKey = getActiveLayer(outputId);
-    const image = await loadImage(skuLayers[layerKey].getImageUrl());
+    const layerKey = getActiveLayer(outputId, context);
+    const image = await loadImage(getSkuLayers(context)[layerKey].getImageUrl());
     if (!image) return;
 
     event.preventDefault();
@@ -1128,6 +1169,7 @@ function bindSkuDrag(canvas, outputId) {
       canvas,
       outputId,
       layerKey,
+      context,
       pointerId: event.pointerId,
       image,
       lastPoint: point,
@@ -1144,8 +1186,8 @@ function bindSkuDrag(canvas, outputId) {
     const deltaY = point.y - skuDrag.lastPoint.y;
     skuDrag.lastPoint = point;
 
-    updateLayerPositionFromDrag(outputId, skuDrag.layerKey, skuDrag.image, deltaX, deltaY);
-    requestCanvasRedraw(outputId, canvas);
+    updateLayerPositionFromDrag(outputId, skuDrag.layerKey, skuDrag.image, deltaX, deltaY, skuDrag.context);
+    requestCanvasRedraw(outputId, canvas, skuDrag.context);
   });
 
   canvas.addEventListener("pointerup", endSkuDrag);
@@ -1153,7 +1195,7 @@ function bindSkuDrag(canvas, outputId) {
   canvas.addEventListener("lostpointercapture", endSkuDrag);
 }
 
-function createPreviewBlock(outputId) {
+function createPreviewBlock(outputId, context = state, onRerender = renderPreviews) {
   const format = outputMeta[outputId];
   const block = document.createElement("section");
   block.className = "preview-block";
@@ -1175,8 +1217,8 @@ function createPreviewBlock(outputId) {
   const actions = document.createElement("div");
   actions.className = "preview-actions";
 
-  const activeLayerKey = getActiveLayer(outputId);
-  const activeLayer = skuLayers[activeLayerKey];
+  const activeLayerKey = getActiveLayer(outputId, context);
+  const activeLayer = getSkuLayers(context)[activeLayerKey];
   const isBackgroundActive = activeLayerKey === "background";
 
   if (hasSkuBackground()) {
@@ -1203,8 +1245,8 @@ function createPreviewBlock(outputId) {
     layerSwitch.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-layer]");
       if (!button || button.classList.contains("is-active")) return;
-      setActiveLayer(outputId, button.dataset.layer);
-      renderPreviews();
+      setActiveLayer(outputId, button.dataset.layer, context);
+      onRerender();
     });
 
     actions.append(layerSwitch);
@@ -1230,7 +1272,7 @@ function createPreviewBlock(outputId) {
   zoomInput.addEventListener("input", () => {
     activeLayer.setZoom(outputId, Number(zoomInput.value) / 100);
     zoomValue.textContent = `${zoomInput.value}%`;
-    if (canvas) requestCanvasRedraw(outputId, canvas);
+    if (canvas) requestCanvasRedraw(outputId, canvas, context);
   });
   zoomControl.append(zoomLabel, zoomInput, zoomValue);
 
@@ -1238,7 +1280,7 @@ function createPreviewBlock(outputId) {
   download.type = "button";
   download.className = "download-button";
   download.textContent = "Download";
-  download.addEventListener("click", () => downloadCanvas(outputId));
+  download.addEventListener("click", () => downloadCanvas(outputId, context));
   actions.append(zoomControl, download);
 
   heading.append(titleWrap, actions);
@@ -1247,11 +1289,11 @@ function createPreviewBlock(outputId) {
   shell.className = "canvas-shell";
   canvas = document.createElement("canvas");
   canvas.className = "asset-canvas";
-  const activeLayerHasImage = isBackgroundActive ? hasSkuBackground() : Boolean(state.skuImageUrl);
+  const activeLayerHasImage = isBackgroundActive ? hasSkuBackground() : Boolean(context.skuImageUrl);
   if (activeLayerHasImage) canvas.classList.add("can-drag");
   canvas.dataset.output = outputId;
   canvas.setAttribute("aria-label", `${format.title} preview`);
-  bindSkuDrag(canvas, outputId);
+  bindSkuDrag(canvas, outputId, context);
   shell.append(canvas);
 
   block.append(heading, shell);
@@ -1264,21 +1306,24 @@ async function renderPreviews() {
   document.documentElement.style.setProperty("--kv", state.kvColor);
   els.templateLabel.textContent = state.template;
 
-  const selected = selectedOutputs();
+  const context = editingContext();
+  const selected = editingOutputs();
 
   if (!selected.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "Select at least one output to preview.";
+    empty.textContent = activeRow
+      ? "Select at least one output above to preview this row."
+      : "Select at least one output to preview.";
     els.previewList.append(empty);
     return;
   }
 
   setStatus("Rendering");
   const jobs = selected.map((outputId) => {
-    const { block, canvas } = createPreviewBlock(outputId);
+    const { block, canvas } = createPreviewBlock(outputId, context, renderPreviews);
     els.previewList.append(block);
-    return drawOutput(outputId, canvas);
+    return drawOutput(outputId, canvas, { context });
   });
 
   await Promise.allSettled(jobs);
@@ -1401,33 +1446,49 @@ function renderSwatchCurrent() {
   });
 }
 
-function readFile(input, key, label) {
+function readFile(input, key, labelKey, labelEl) {
   const [file] = input.files;
   if (!file) return;
 
-  if (state[key]?.startsWith("blob:")) {
-    imageCache.delete(state[key]);
-    URL.revokeObjectURL(state[key]);
+  const context = editingContext();
+  if (context[key]?.startsWith("blob:")) {
+    imageCache.delete(context[key]);
+    URL.revokeObjectURL(context[key]);
   }
 
-  state[key] = URL.createObjectURL(file);
+  context[key] = URL.createObjectURL(file);
+  context[labelKey] = titleCaseFileName(file.name);
   if (key === "skuImageUrl") {
-    state.skuPositions = {};
-    state.skuZooms = {};
+    context.skuPositions = {};
+    context.skuZooms = {};
   }
-  label.textContent = titleCaseFileName(file.name);
+  labelEl.textContent = context[labelKey];
   renderPreviews();
 }
 
 function syncOutputButtons() {
+  const outputs = editingContext().outputs;
   els.outputButtons.querySelectorAll("button").forEach((button) => {
-    const isSelected = state.outputs.has(button.dataset.output);
+    const isSelected = outputs.has(button.dataset.output);
     button.setAttribute("aria-selected", String(isSelected));
   });
 }
 
 function syncKspCount() {
-  els.kspCount.textContent = `${state.ksp.length}/${KSP_MAX_CHARACTERS}`;
+  els.kspCount.textContent = `${editingContext().ksp.length}/${KSP_MAX_CHARACTERS}`;
+}
+
+// Populates the sidebar's display-only fields (KSP text, image filenames,
+// output selection) from whichever context is currently active. Template,
+// KV color, toggles, and SKU background stay put — they're shared globally
+// and every context already reads them straight from `state`.
+function syncEditorFieldsFromContext() {
+  const context = editingContext();
+  els.kspInput.value = context.ksp;
+  syncKspCount();
+  els.brandFileName.textContent = context.brandLogoLabel || "Upload";
+  els.skuFileName.textContent = context.skuImageLabel || "Upload";
+  syncOutputButtons();
 }
 
 function selectedOutputs() {
@@ -1525,11 +1586,11 @@ const PHOTO_SOFTEN_QUALITIES = [0.92, 0.82, 0.7, 0.58, 0.46, 0.34, 0.24, 0.16, 0
 // composited back in. Everything else in the banner (KV background, overlay ribbon/badge,
 // brand logo, KSP text) is flat graphic content that a lossless PNG encodes near-perfectly,
 // so keeping those pixels out of any lossy step is what keeps them crisp.
-async function createPhotoLayer(outputId, quality) {
+async function createPhotoLayer(outputId, quality, context = state) {
   const format = outputMeta[outputId];
   const layout = getLayout(format);
   const [skuImage, backgroundImage] = await Promise.all([
-    loadImage(state.skuImageUrl),
+    loadImage(context.skuImageUrl),
     loadImage(getSkuBackgroundSrc()),
   ]);
 
@@ -1559,8 +1620,8 @@ async function createPhotoLayer(outputId, quality) {
   }
 
   if (skuImage) {
-    const skuPosition = getSkuPosition(outputId, layout, skuImage);
-    const skuZoom = getSkuZoom(outputId);
+    const skuPosition = getSkuPosition(outputId, layout, skuImage, context);
+    const skuZoom = getSkuZoom(outputId, context);
     drawCover(
       photoCtx,
       skuImage,
@@ -1591,13 +1652,13 @@ async function createPhotoLayer(outputId, quality) {
   }
 }
 
-async function renderPngWithSoftenedPhoto(outputId, quality) {
+async function renderPngWithSoftenedPhoto(outputId, quality, context = state) {
   const format = outputMeta[outputId];
-  const photoLayer = await createPhotoLayer(outputId, quality);
+  const photoLayer = await createPhotoLayer(outputId, quality, context);
   const exportCanvas = document.createElement("canvas");
   exportCanvas.width = format.width;
   exportCanvas.height = format.height;
-  await drawOutput(outputId, exportCanvas, { photoOverride: photoLayer });
+  await drawOutput(outputId, exportCanvas, { photoOverride: photoLayer, context });
   return exportCanvas;
 }
 
@@ -1673,7 +1734,7 @@ async function createEmergencyExport(canvas) {
   return smallestFile;
 }
 
-async function renderExportCanvas(outputId) {
+async function renderExportCanvas(outputId, context = state) {
   const format = outputMeta[outputId];
   const exportCanvas = document.createElement("canvas");
   exportCanvas.width = format.width;
@@ -1681,12 +1742,12 @@ async function renderExportCanvas(outputId) {
   const ctx = exportCanvas.getContext("2d");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  await drawOutput(outputId, exportCanvas);
+  await drawOutput(outputId, exportCanvas, { context });
   return exportCanvas;
 }
 
-async function createExportFile(outputId) {
-  const canvas = await renderExportCanvas(outputId);
+async function createExportFile(outputId, context = state) {
+  const canvas = await renderExportCanvas(outputId, context);
   const pngBlob = await encodeCanvas(canvas, EXPORT_TYPE);
   const sizeLimited = SIZE_LIMITED_OUTPUTS.has(outputId);
 
@@ -1721,7 +1782,7 @@ async function createExportFile(outputId) {
   // Try shrinking by softening only the photo region and keeping the ribbon/logo/text
   // crisp, re-exporting as lossless PNG each time, before falling back to full JPEG.
   for (const quality of PHOTO_SOFTEN_QUALITIES) {
-    const softCanvas = await renderPngWithSoftenedPhoto(outputId, quality);
+    const softCanvas = await renderPngWithSoftenedPhoto(outputId, quality, context);
     const softPngBlob = await encodeCanvas(softCanvas, EXPORT_TYPE);
     if (!softPngBlob) continue;
 
@@ -1772,10 +1833,10 @@ async function createExportFile(outputId) {
   throw new Error("No export file was generated.");
 }
 
-async function downloadCanvas(outputId) {
+async function downloadCanvas(outputId, context = state) {
   try {
     setStatus("Compressing");
-    const file = await createExportFile(outputId);
+    const file = await createExportFile(outputId, context);
     downloadBlob(file.blob, file.name);
     setStatus(
       !file.sizeLimited || file.blob.size <= EXPORT_MAX_BYTES
@@ -1904,7 +1965,8 @@ async function createZip(files) {
 }
 
 async function downloadAll() {
-  const selected = selectedOutputs();
+  const context = editingContext();
+  const selected = editingOutputs();
   if (!selected.length) {
     setStatus("Select output");
     return;
@@ -1920,14 +1982,17 @@ async function downloadAll() {
 
     const files = [];
     for (const outputId of selected) {
-      const file = await createExportFile(outputId);
+      const file = await createExportFile(outputId, context);
       if (file?.blob) files.push(file);
     }
 
     if (!files.length) throw new Error("No files were generated.");
 
     const zip = await createZip(files);
-    downloadBlob(zip, "campaign-assets.zip");
+    const zipName = activeRow
+      ? `row-${bulkState.rows.indexOf(activeRow) + 1}-assets.zip`
+      : "campaign-assets.zip";
+    downloadBlob(zip, zipName);
     const hasOversizedFile = files.some(
       (file) => file.sizeLimited && file.blob.size > EXPORT_MAX_BYTES,
     );
@@ -1945,13 +2010,417 @@ async function downloadAll() {
 
 }
 
+// ---------------------------------------------------------------------------
+// Bulk generate from CSV
+//
+// This is a separate, self-contained workflow that borrows the existing
+// single-image render pipeline (createExportFile / drawOutput / the main
+// preview stage) rather than duplicating it. Template, KV color, toggles,
+// and SKU background always stay whatever the sidebar currently has
+// configured — those are shared and apply to every row. Brand logo, SKU
+// image, KSP text, output selection, and SKU position/zoom are each row's
+// own — clicking "Preview & edit" makes that row the active editing
+// context (see `activeRow` above), so the exact same sidebar fields and
+// main-stage preview cards used for the single brand become that row's
+// editor until you click "Back to main editor".
+// ---------------------------------------------------------------------------
+
+const BULK_OUTPUT_IDS = Object.keys(outputMeta);
+const BULK_DEFAULT_OUTPUTS = new Set(["category-banner", "banner-card"]);
+const BULK_CSV_TEMPLATE =
+  "KSP,Brand Logo,SKU Image\r\n" +
+  "EXCLUSIVE LAUNCH DISKON 25%,https://cf.shopee.co.id/file/<brand-logo-hash>,https://cf.shopee.co.id/file/<sku-image-hash>\r\n";
+
+const bulkState = {
+  rows: [],
+  defaultOutputs: new Set(BULK_DEFAULT_OUTPUTS),
+};
+let bulkRowSeq = 0;
+
+// Minimal RFC4126-style CSV parser: handles quoted fields, embedded commas,
+// escaped quotes ("") inside quoted fields, and CRLF/LF line endings.
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+
+  const pushField = () => {
+    row.push(field);
+    field = "";
+  };
+  const pushRow = () => {
+    pushField();
+    rows.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') inQuotes = true;
+    else if (char === ",") pushField();
+    else if (char === "\n") pushRow();
+    else if (char === "\r") {
+      // Ignore; a following \n (if any) triggers the row push.
+    } else field += char;
+  }
+
+  if (field.length > 0 || row.length > 0) pushRow();
+
+  return rows.filter((cells) => cells.some((cell) => cell.trim() !== ""));
+}
+
+function findCsvColumn(header, patterns) {
+  return header.findIndex((cell) =>
+    patterns.some((pattern) => pattern.test(cell.trim().toLowerCase())),
+  );
+}
+
+function mapCsvColumns(header) {
+  return {
+    ksp: findCsvColumn(header, [/^ksp$/, /ksp/]),
+    brandLogo: findCsvColumn(header, [/^brand logo$/, /brand[\s_-]*logo/, /\blogo\b/]),
+    skuImage: findCsvColumn(header, [/^sku image$/, /sku[\s_-]*image/, /\bsku\b/]),
+  };
+}
+
+function createBulkRowsFromCsv(text) {
+  const table = parseCsv(text);
+  if (!table.length) return [];
+
+  const detected = mapCsvColumns(table[0]);
+  const headerRecognized = detected.ksp !== -1 || detected.brandLogo !== -1 || detected.skuImage !== -1;
+  const columns = headerRecognized ? detected : { ksp: 0, brandLogo: 1, skuImage: 2 };
+  const dataRows = headerRecognized ? table.slice(1) : table;
+
+  return dataRows.map((cells) => {
+    const kspRaw = (cells[columns.ksp] || "").trim();
+    return {
+      id: `bulk-row-${(bulkRowSeq += 1)}`,
+      kspRaw,
+      brandLogoRaw: (cells[columns.brandLogo] || "").trim(),
+      skuImageRaw: (cells[columns.skuImage] || "").trim(),
+      outputs: new Set(bulkState.defaultOutputs),
+      status: "pending",
+      statusLabel: "Ready",
+      // Each row is its own self-contained editing context — same shape the
+      // shared render pipeline expects from `state` — so a row can be
+      // previewed/edited independently without touching the single editor.
+      brandLogoUrl: "",
+      brandLogoLabel: "",
+      skuImageUrl: "",
+      skuImageLabel: "",
+      ksp: normalizedKsp(kspRaw),
+      skuPositions: {},
+      skuZooms: {},
+      activeLayerByOutput: {},
+      resolved: false,
+      resolving: null,
+      imagesFailed: false,
+    };
+  });
+}
+
+// Fetches a row's brand logo + SKU image exactly once, caching the result on
+// the row itself. Safe to call repeatedly (e.g. every time a row expands) —
+// concurrent calls share the same in-flight promise instead of re-fetching.
+function ensureBulkRowResolved(row) {
+  if (row.resolved) return Promise.resolve(row);
+  if (row.resolving) return row.resolving;
+
+  row.resolving = (async () => {
+    try {
+      const [brandLogoUrl, skuImageUrl] = await Promise.all([
+        row.brandLogoRaw ? resolveBulkImage(row.brandLogoRaw) : Promise.resolve(""),
+        row.skuImageRaw ? resolveBulkImage(row.skuImageRaw) : Promise.resolve(""),
+      ]);
+      row.brandLogoUrl = brandLogoUrl;
+      row.brandLogoLabel = row.brandLogoRaw ? imageLabelFromSource(row.brandLogoRaw) : "";
+      row.skuImageUrl = skuImageUrl;
+      row.skuImageLabel = row.skuImageRaw ? imageLabelFromSource(row.skuImageRaw) : "";
+      row.resolved = true;
+      row.imagesFailed = false;
+      return row;
+    } catch (error) {
+      console.error("Bulk row image load failed", row, error);
+      row.imagesFailed = true;
+      throw error;
+    } finally {
+      row.resolving = null;
+    }
+  })();
+
+  return row.resolving;
+}
+
+// Releases any blob URLs a row is holding onto. Call this when a row is
+// removed or the whole CSV is replaced — not after every generate — since
+// rows now cache their resolved images across preview + generate.
+function releaseBulkRowImages(row) {
+  [row.brandLogoUrl, row.skuImageUrl].forEach((url) => {
+    if (url?.startsWith("blob:")) {
+      imageCache.delete(url);
+      URL.revokeObjectURL(url);
+    }
+  });
+}
+
+async function resolveBulkImage(rawValue) {
+  const candidates = getImageCandidates(rawValue);
+  if (!candidates.length) return "";
+
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      return await fetchImageObjectUrl(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Image could not be loaded.");
+}
+
+function setBulkRowStatus(row, label, kind) {
+  row.statusLabel = label;
+  row.status = kind;
+  const statusEl = els.bulkRows.querySelector(`[data-row-status="${row.id}"]`);
+  if (!statusEl) return;
+  statusEl.textContent = label;
+  statusEl.classList.toggle("is-done", kind === "done");
+  statusEl.classList.toggle("is-error", kind === "error");
+}
+
+function renderBulkSummary() {
+  const totalAssets = bulkState.rows.reduce((sum, row) => sum + row.outputs.size, 0);
+  els.bulkSummary.textContent = bulkState.rows.length
+    ? `${bulkState.rows.length} row${bulkState.rows.length === 1 ? "" : "s"} × mixed outputs → ${totalAssets} asset${totalAssets === 1 ? "" : "s"}`
+    : "";
+  els.bulkGenerateButton.disabled = !bulkState.rows.length || totalAssets === 0;
+}
+
+function createBulkRowElement(row, index) {
+  const el = document.createElement("div");
+  el.className = "bulk-row";
+  el.dataset.rowId = row.id;
+  const isActive = activeRow === row;
+  el.classList.toggle("is-editing", isActive);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "bulk-row-remove";
+  remove.setAttribute("aria-label", `Remove row ${index + 1}`);
+  remove.textContent = "×";
+  remove.addEventListener("click", () => {
+    if (activeRow === row) exitRowEditing();
+    releaseBulkRowImages(row);
+    bulkState.rows = bulkState.rows.filter((candidate) => candidate.id !== row.id);
+    renderBulkRows();
+  });
+
+  const main = document.createElement("div");
+  main.className = "bulk-row-main";
+  const title = document.createElement("div");
+  title.className = "bulk-row-title";
+  title.textContent = `Row ${index + 1}`;
+  const ksp = document.createElement("div");
+  ksp.className = "bulk-row-ksp";
+  ksp.textContent = row.kspRaw || "(no KSP text)";
+  main.append(title, ksp);
+
+  const outputsRow = document.createElement("div");
+  outputsRow.className = "chip-row bulk-row-outputs";
+  BULK_OUTPUT_IDS.forEach((outputId) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip-button sm";
+    chip.dataset.output = outputId;
+    chip.textContent = outputMeta[outputId].title;
+    chip.classList.toggle("is-active", row.outputs.has(outputId));
+    chip.addEventListener("click", () => {
+      if (row.outputs.has(outputId)) row.outputs.delete(outputId);
+      else row.outputs.add(outputId);
+      chip.classList.toggle("is-active", row.outputs.has(outputId));
+      renderBulkSummary();
+      if (activeRow === row) {
+        syncOutputButtons();
+        renderPreviews();
+      }
+    });
+    outputsRow.append(chip);
+  });
+
+  const status = document.createElement("span");
+  status.className = "bulk-row-status";
+  status.textContent = row.statusLabel;
+  status.dataset.rowStatus = row.id;
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "bulk-row-toggle";
+  toggle.textContent = isActive ? "Editing…" : "Preview & edit";
+  toggle.setAttribute("aria-pressed", String(isActive));
+  toggle.addEventListener("click", () => {
+    if (isActive) exitRowEditing();
+    else enterRowEditing(row);
+  });
+
+  el.append(remove, main, outputsRow, status, toggle);
+  return el;
+}
+
+// Makes a bulk row the thing the main editor (sidebar fields + preview
+// stage) is currently pointed at, reusing that exact same UI instead of a
+// separate/simplified editor. Resolves the row's images first (cached after
+// the first time), then hands the shared render pipeline the row instead
+// of `state`.
+async function enterRowEditing(row) {
+  els.bulkRows.querySelectorAll(".bulk-row-toggle").forEach((button) => {
+    button.disabled = true;
+  });
+  setStatus("Loading row images...");
+
+  try {
+    await ensureBulkRowResolved(row);
+  } catch (error) {
+    setBulkRowStatus(row, "Image failed", "error");
+    setStatus("Image load failed");
+    window.setTimeout(() => setStatus("Ready"), 2200);
+    els.bulkRows.querySelectorAll(".bulk-row-toggle").forEach((button) => {
+      button.disabled = false;
+    });
+    return;
+  }
+
+  activeRow = row;
+  syncEditorFieldsFromContext();
+  renderStageBanner();
+  await renderPreviews();
+  renderBulkRows();
+}
+
+function exitRowEditing() {
+  activeRow = null;
+  syncEditorFieldsFromContext();
+  renderStageBanner();
+  renderPreviews();
+  renderBulkRows();
+}
+
+function renderStageBanner() {
+  if (!els.stageBanner) return;
+  if (!activeRow) {
+    els.stageBanner.hidden = true;
+    return;
+  }
+  const rowNumber = bulkState.rows.indexOf(activeRow) + 1;
+  els.stageBannerText.textContent = rowNumber
+    ? `Editing Row ${rowNumber}${activeRow.kspRaw ? ` — ${activeRow.kspRaw}` : ""}`
+    : "Editing bulk row";
+  els.stageBanner.hidden = false;
+}
+
+function renderBulkRows() {
+  els.bulkRows.innerHTML = "";
+  bulkState.rows.forEach((row, index) => {
+    els.bulkRows.append(createBulkRowElement(row, index));
+  });
+  els.bulkPanel.classList.toggle("has-rows", bulkState.rows.length > 0);
+  renderBulkSummary();
+}
+
+async function generateBulk() {
+  const rowsToRun = bulkState.rows.filter((row) => row.outputs.size > 0);
+  if (!rowsToRun.length) {
+    setStatus("Add outputs to at least one row");
+    window.setTimeout(() => setStatus("Ready"), 1800);
+    return;
+  }
+
+  els.bulkGenerateButton.disabled = true;
+  const originalLabel = els.bulkGenerateButton.textContent;
+  els.bulkGenerateButton.textContent = "Generating...";
+
+  // Each row is already its own self-contained editing context (brand
+  // logo, SKU image, KSP, positions, zooms), so generation just calls the
+  // shared export pipeline once per row/output — no borrowing or restoring
+  // the single-image editor's `state`, and no disturbance to its preview.
+  const files = [];
+  let failed = 0;
+
+  try {
+    for (let index = 0; index < rowsToRun.length; index += 1) {
+      const row = rowsToRun[index];
+      setStatus(`Bulk row ${index + 1} of ${rowsToRun.length}`);
+
+      try {
+        await ensureBulkRowResolved(row);
+      } catch (error) {
+        setBulkRowStatus(row, "Image failed", "error");
+        failed += 1;
+        continue;
+      }
+
+      setBulkRowStatus(row, "Generating...", "pending");
+
+      const rowFolder = `row-${bulkState.rows.indexOf(row) + 1}`;
+      let rowFailed = false;
+      for (const outputId of row.outputs) {
+        try {
+          const file = await createExportFile(outputId, row);
+          files.push({ ...file, name: `${rowFolder}/${file.name}` });
+        } catch (error) {
+          console.error("Bulk export failed", row, outputId, error);
+          rowFailed = true;
+        }
+      }
+
+      if (rowFailed) {
+        failed += 1;
+        setBulkRowStatus(row, "Partial failure", "error");
+      } else {
+        setBulkRowStatus(row, "Done", "done");
+      }
+    }
+
+    if (!files.length) throw new Error("No assets were generated.");
+
+    const zip = await createZip(files);
+    downloadBlob(zip, "bulk-campaign-assets.zip");
+    setStatus(failed ? `Done — ${failed} row(s) failed` : "Bulk generate done");
+    window.setTimeout(() => setStatus("Ready"), 2400);
+  } catch (error) {
+    console.error("Bulk generate failed", error);
+    setStatus("Bulk generate failed");
+    window.setTimeout(() => setStatus("Ready"), 2400);
+  } finally {
+    els.bulkGenerateButton.disabled = false;
+    els.bulkGenerateButton.textContent = originalLabel;
+    renderBulkSummary();
+  }
+}
+
 els.templateSelect.addEventListener("change", (event) => {
   state.template = event.target.value;
   renderPreviews();
 });
 
 els.brandLogoInput.addEventListener("change", () => {
-  readFile(els.brandLogoInput, "brandLogoUrl", els.brandFileName);
+  readFile(els.brandLogoInput, "brandLogoUrl", "brandLogoLabel", els.brandFileName);
 });
 
 els.logoContainerToggle.addEventListener("change", (event) => {
@@ -1965,7 +2434,7 @@ els.shopeeLogoToggle.addEventListener("change", (event) => {
 });
 
 els.skuImageInput.addEventListener("change", () => {
-  readFile(els.skuImageInput, "skuImageUrl", els.skuFileName);
+  readFile(els.skuImageInput, "skuImageUrl", "skuImageLabel", els.skuFileName);
 });
 
 els.skuLink.addEventListener("input", (event) => {
@@ -2007,7 +2476,12 @@ els.bgNextButton?.addEventListener("click", () => {
 els.kspInput.addEventListener("input", (event) => {
   const value = normalizedKsp(event.target.value);
   if (value !== event.target.value) event.target.value = value;
-  state.ksp = value;
+  const context = editingContext();
+  context.ksp = value;
+  if (activeRow) {
+    activeRow.kspRaw = value;
+    renderBulkRows();
+  }
   syncKspCount();
   renderPreviews();
 });
@@ -2057,11 +2531,13 @@ els.outputButtons.addEventListener("click", (event) => {
   if (!button) return;
 
   const { output } = button.dataset;
-  if (state.outputs.has(output)) state.outputs.delete(output);
-  else state.outputs.add(output);
+  const outputs = editingContext().outputs;
+  if (outputs.has(output)) outputs.delete(output);
+  else outputs.add(output);
 
   syncOutputButtons();
   renderPreviews();
+  if (activeRow) renderBulkRows();
 });
 
 els.generateButton.addEventListener("click", () => {
@@ -2072,6 +2548,61 @@ els.generateButton.addEventListener("click", () => {
 });
 
 els.downloadAllButton.addEventListener("click", downloadAll);
+
+els.bulkDefaultOutputs.querySelectorAll("button[data-output]").forEach((button) => {
+  button.classList.toggle("is-active", bulkState.defaultOutputs.has(button.dataset.output));
+  button.addEventListener("click", () => {
+    const { output } = button.dataset;
+    if (bulkState.defaultOutputs.has(output)) bulkState.defaultOutputs.delete(output);
+    else bulkState.defaultOutputs.add(output);
+    button.classList.toggle("is-active", bulkState.defaultOutputs.has(output));
+  });
+});
+
+els.bulkCsvInput.addEventListener("change", async () => {
+  const [file] = els.bulkCsvInput.files;
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const newRows = createBulkRowsFromCsv(text);
+    if (!newRows.length) {
+      setStatus("No rows found in CSV");
+      window.setTimeout(() => setStatus("Ready"), 1800);
+      return;
+    }
+
+    const wasEditingRow = Boolean(activeRow);
+    bulkState.rows.forEach(releaseBulkRowImages);
+    bulkState.rows = newRows;
+    activeRow = null;
+    if (wasEditingRow) {
+      syncEditorFieldsFromContext();
+      renderStageBanner();
+      renderPreviews();
+    }
+    els.bulkCsvFileName.textContent = titleCaseFileName(file.name);
+    els.bulkPanel.open = true;
+    renderBulkRows();
+    setStatus(`${newRows.length} row${newRows.length === 1 ? "" : "s"} loaded`);
+    window.setTimeout(() => setStatus("Ready"), 1800);
+  } catch (error) {
+    console.error("CSV read failed", error);
+    setStatus("CSV read failed");
+    window.setTimeout(() => setStatus("Ready"), 1800);
+  } finally {
+    els.bulkCsvInput.value = "";
+  }
+});
+
+els.bulkTemplateButton.addEventListener("click", () => {
+  const blob = new Blob([BULK_CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
+  downloadBlob(blob, "bulk-generate-template.csv");
+});
+
+els.bulkGenerateButton.addEventListener("click", generateBulk);
+
+els.stageBannerExit?.addEventListener("click", exitRowEditing);
 
 const THEME_STORAGE_KEY = "shopeeMallTheme";
 
@@ -2120,4 +2651,5 @@ drawColorCanvas();
 setKspColor(state.kspColor);
 setColor(state.kvColor);
 renderBackgroundPicker();
+renderBulkRows();
 initTheme();
