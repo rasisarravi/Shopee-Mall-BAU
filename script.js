@@ -15,6 +15,17 @@ const NEW_ARRIVAL_LOGO_COLOR_URL = "assets/logos/New-Arrival-Logo-Color.png";
 // color), and the design only has artwork for these two formats.
 const PAYING_SELLER_TEMPLATE = "8.8 Paying Seller";
 const PAYING_SELLER_OUTPUTS = new Set(["category-banner", "banner-card"]);
+// In-browser background removal (WASM/ONNX, runs entirely client-side — no
+// server, no upload). Loaded on demand from jsDelivr's ESM CDN build so the
+// project keeps its zero-build-step, no-local-dependency setup.
+const BACKGROUND_REMOVAL_MODULE_URL =
+  "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm";
+// esm.sh is tried if jsDelivr's bundle fails to load or run — the package has
+// a WASM peer dependency (onnxruntime-web) that not every CDN bundler
+// resolves the same way, so a second source improves the odds this works on
+// a given network/browser without any code changes needed.
+const BACKGROUND_REMOVAL_FALLBACK_MODULE_URL =
+  "https://esm.sh/@imgly/background-removal@1.7.0";
 const EXPORT_MAX_BYTES = 250 * 1000;
 const EXPORT_TARGET_BYTES = 248 * 1000;
 const EXPORT_TYPE = "image/png";
@@ -224,6 +235,8 @@ const els = {
   skuFileName: document.querySelector("#skuFileName"),
   skuLink: document.querySelector("#skuLink"),
   loadSkuLinkButton: document.querySelector("#loadSkuLinkButton"),
+  removeBgButton: document.querySelector("#removeBgButton"),
+  removeBgError: document.querySelector("#removeBgError"),
   bgPrevButton: document.querySelector("#bgPrevButton"),
   bgNextButton: document.querySelector("#bgNextButton"),
   bgSwatch: document.querySelector("#bgSwatch"),
@@ -283,6 +296,8 @@ let skuDrag = null;
 // then read/write that row instead, so it becomes a full editor for that
 // row without any separate/duplicated UI.
 let activeRow = null;
+let backgroundRemovalModulePromise = null;
+let bgRemovalRunning = false;
 
 function editingContext() {
   return activeRow || state;
@@ -497,6 +512,127 @@ function setSkuImageUrl(url, labelText) {
   els.skuFileName.textContent = context.skuImageLabel;
 }
 
+// Loads the background-removal engine on first use only (it's a ~1MB JS
+// module plus a lazily-fetched ONNX model, so nothing downloads until the
+// user actually clicks the button). Cached so repeat clicks reuse the same
+// module instead of re-importing.
+function loadBackgroundRemovalModule() {
+  if (!backgroundRemovalModulePromise) {
+    backgroundRemovalModulePromise = import(BACKGROUND_REMOVAL_MODULE_URL).catch((primaryError) => {
+      console.warn("Background removal: primary CDN failed, trying fallback.", primaryError);
+      return import(BACKGROUND_REMOVAL_FALLBACK_MODULE_URL).catch((fallbackError) => {
+        backgroundRemovalModulePromise = null;
+        throw fallbackError;
+      });
+    });
+  }
+  return backgroundRemovalModulePromise;
+}
+
+// CDN bundlers (jsDelivr's +esm, esm.sh) don't always reshape a package's
+// default export identically — depending on the bundler, the callable
+// function can end up as the module namespace itself, `.default`, or a
+// double-wrapped `.default.default` (common CJS/ESM interop artifact). Try
+// every shape actually seen in the wild instead of assuming one.
+function resolveRemoveBackgroundFn(module) {
+  const candidates = [
+    module,
+    module?.default,
+    module?.default?.default,
+    module?.removeBackground,
+    module?.default?.removeBackground,
+  ];
+  return candidates.find((candidate) => typeof candidate === "function") || null;
+}
+
+// Runs in-browser background removal on the current context's SKU image and
+// swaps the result in. Unlike setSkuImageUrl, this intentionally keeps the
+// existing skuPositions/skuZooms so a photo the user already framed doesn't
+// jump back to center just because its background changed.
+async function removeBackgroundFromSku() {
+  if (bgRemovalRunning) return;
+
+  const context = editingContext();
+  if (!context.skuImageUrl) {
+    setStatus("Add a SKU image first");
+    window.setTimeout(() => setStatus("Ready"), 1800);
+    return;
+  }
+
+  const button = els.removeBgButton;
+  bgRemovalRunning = true;
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "Loading model...";
+  if (els.removeBgError) {
+    els.removeBgError.hidden = true;
+    els.removeBgError.textContent = "";
+  }
+  setStatus("Removing background (first run downloads a model, please wait)");
+
+  try {
+    const module = await loadBackgroundRemovalModule();
+    const removeBackground = resolveRemoveBackgroundFn(module);
+    if (!removeBackground) {
+      console.error("Background removal module shape:", module);
+      throw new Error("Could not find the background removal function in the loaded module.");
+    }
+
+    const sourceResponse = await fetch(context.skuImageUrl);
+    const sourceBlob = await sourceResponse.blob();
+
+    const resultBlob = await removeBackground(sourceBlob, {
+      output: { format: "image/png", quality: 1 },
+      progress: (key, current, total) => {
+        if (!total) return;
+        const percent = Math.round((current / total) * 100);
+        button.textContent = `Removing background... ${percent}%`;
+      },
+    });
+
+    const newUrl = URL.createObjectURL(resultBlob);
+    const previousUrl = context.skuImageUrl;
+
+    // The row/state this run started on always gets the result, even if the
+    // user has since switched to editing something else (only one removal
+    // job runs at a time, so a background row keeps its own data correctly).
+    context.skuImageUrl = newUrl;
+    context.skuImageLabel = context.skuImageLabel
+      ? `${context.skuImageLabel} (BG removed)`
+      : "Background removed";
+
+    if (previousUrl.startsWith("blob:")) {
+      imageCache.delete(previousUrl);
+      URL.revokeObjectURL(previousUrl);
+    }
+
+    // But only touch what's currently on screen if that's still this same
+    // context — otherwise we'd stomp the filename label/preview of whatever
+    // the user switched to while this run was in flight.
+    if (editingContext() === context) {
+      els.skuFileName.textContent = context.skuImageLabel;
+      await renderPreviews();
+      setStatus("Background removed");
+      window.setTimeout(() => setStatus("Ready"), 1600);
+    }
+  } catch (error) {
+    console.error("Background removal failed", error);
+    if (editingContext() === context) {
+      setStatus("Background removal failed");
+      window.setTimeout(() => setStatus("Ready"), 2400);
+      if (els.removeBgError) {
+        const detail = error?.message || String(error);
+        els.removeBgError.textContent = `Background removal failed: ${detail}`;
+        els.removeBgError.hidden = false;
+      }
+    }
+  } finally {
+    bgRemovalRunning = false;
+    button.disabled = !editingContext().skuImageUrl;
+    button.textContent = originalLabel;
+  }
+}
+
 async function loadSkuImageFromInput() {
   const source = els.skuLink.value.trim();
   const candidates = getImageCandidates(source);
@@ -528,6 +664,7 @@ async function loadSkuImageFromInput() {
     if (!loadedUrl) throw lastError || new Error("Image could not be loaded.");
 
     setSkuImageUrl(loadedUrl, imageLabelFromSource(source));
+    syncRemoveBgAvailability(editingContext());
     await renderPreviews();
     setStatus("Image loaded");
     window.setTimeout(() => setStatus("Ready"), 1400);
@@ -1525,6 +1662,7 @@ function readFile(input, key, labelKey, labelEl) {
     context.skuZooms = {};
   }
   labelEl.textContent = context[labelKey];
+  if (key === "skuImageUrl") syncRemoveBgAvailability(context);
   renderPreviews();
 }
 
@@ -1584,6 +1722,7 @@ function syncEditorFieldsFromContext() {
   els.brandFileName.textContent = context.brandLogoLabel || "Upload";
   els.skuFileName.textContent = context.skuImageLabel || "Upload";
   syncOutputButtons();
+  syncRemoveBgAvailability(context);
 
   els.templateSelect.value = context.template;
   els.logoContainerToggle.checked = context.hideLogoContainer;
@@ -1614,6 +1753,13 @@ function syncKvColorAvailability(context) {
   [els.nativeColor, els.hexInput, els.hueRange].forEach((input) => {
     if (input) input.disabled = disabled;
   });
+}
+
+// Disable "Remove Background" until this context has a SKU image loaded, and
+// keep it out of the way while a removal run is already in flight.
+function syncRemoveBgAvailability(context) {
+  if (!els.removeBgButton || bgRemovalRunning) return;
+  els.removeBgButton.disabled = !context.skuImageUrl;
 }
 
 function selectedOutputs() {
@@ -2617,6 +2763,7 @@ els.skuLink.addEventListener("keydown", (event) => {
 });
 
 els.loadSkuLinkButton.addEventListener("click", loadSkuImageFromInput);
+els.removeBgButton?.addEventListener("click", removeBackgroundFromSku);
 
 function renderBackgroundPicker() {
   const context = editingContext();
@@ -2821,6 +2968,7 @@ renderSwatches();
 syncOutputButtons();
 syncOutputAvailability(state);
 syncKvColorAvailability(state);
+syncRemoveBgAvailability(state);
 syncKspCount();
 drawColorCanvas();
 setKspColor(state.kspColor);

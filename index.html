@@ -149,6 +149,17 @@
           </div>
 
           <div class="form-row">
+            <label>Remove Background</label>
+            <button type="button" class="field-action-button" id="removeBgButton">
+              Remove Background
+            </button>
+            <p class="field-hint">
+              Runs locally in your browser — the image is never uploaded anywhere. First use downloads a one-time ~80MB model (cached after that); repeat uses are fast.
+            </p>
+            <p class="field-hint is-error" id="removeBgError" hidden></p>
+          </div>
+
+          <div class="form-row">
             <label>SKU Background</label>
             <div class="bg-picker span-wide">
               <button type="button" id="bgPrevButton" class="bg-arrow-button" aria-label="Previous SKU background">
