@@ -6,8 +6,15 @@ const OVERLAY_NO_CONTAINER_BASE = "assets/overlays-no-logo-container/";
 const NEW_ARRIVAL_OVERLAY_BASE = "assets/new-arrival/overlays/";
 const NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE =
   "assets/new-arrival/overlays-no-logo-container/";
+const PAYING_SELLER_OVERLAY_BASE = "assets/paying-seller/overlays/";
+const PAYING_SELLER_OVERLAY_NO_CONTAINER_BASE =
+  "assets/paying-seller/overlays-no-logo-container/";
 const ORANGE_SHOPEE_LOGO_URL = "assets/logos/Shopee-Logo-Vertical-Orange-icon.png";
 const NEW_ARRIVAL_LOGO_COLOR_URL = "assets/logos/New-Arrival-Logo-Color.png";
+// 8.8 Paying Seller's background is a fixed campaign image (not a flat KV
+// color), and the design only has artwork for these two formats.
+const PAYING_SELLER_TEMPLATE = "8.8 Paying Seller";
+const PAYING_SELLER_OUTPUTS = new Set(["category-banner", "banner-card"]);
 const EXPORT_MAX_BYTES = 250 * 1000;
 const EXPORT_TARGET_BYTES = 248 * 1000;
 const EXPORT_TYPE = "image/png";
@@ -15,7 +22,9 @@ const EXPORT_EXTENSION = "png";
 const LOSSY_EXPORT_FORMATS = [
   { type: "image/jpeg", extension: "jpg", label: "JPG", minQuality: 0.01, maxQuality: 0.95 },
 ];
-const DETAIL_LIMIT_SCALES = [0.85, 0.72, 0.6, 0.5, 0.42, 0.35, 0.28, 0.22, 0.16, 0.1, 0.06];
+const DETAIL_LIMIT_SCALES = [
+  0.95, 0.9, 0.85, 0.78, 0.72, 0.6, 0.5, 0.42, 0.35, 0.28, 0.22, 0.16, 0.1, 0.06,
+];
 const SIZE_LIMITED_OUTPUTS = new Set(["category-banner", "top-module-banner", "banner-card"]);
 const EXTERNAL_SHOPEE_LOGO_OUTPUTS = new Set(["ig-story", "fb-post"]);
 const SKU_ZOOM_MIN = 0.1;
@@ -65,6 +74,8 @@ const outputMeta = {
     overlayNoContainer: `${OVERLAY_NO_CONTAINER_BASE}category-banner.png`,
     newArrivalOverlay: `${NEW_ARRIVAL_OVERLAY_BASE}category-banner.png`,
     newArrivalOverlayNoContainer: `${NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE}category-banner.png`,
+    payingSellerOverlay: `${PAYING_SELLER_OVERLAY_BASE}category-banner.png`,
+    payingSellerOverlayNoContainer: `${PAYING_SELLER_OVERLAY_NO_CONTAINER_BASE}category-banner.png`,
   },
   "top-module-banner": {
     title: "Top Module Banner",
@@ -101,6 +112,8 @@ const outputMeta = {
     overlayNoContainer: `${OVERLAY_NO_CONTAINER_BASE}banner-card.png`,
     newArrivalOverlay: `${NEW_ARRIVAL_OVERLAY_BASE}banner-card.png`,
     newArrivalOverlayNoContainer: `${NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE}banner-card.png`,
+    payingSellerOverlay: `${PAYING_SELLER_OVERLAY_BASE}banner-card.png`,
+    payingSellerOverlayNoContainer: `${PAYING_SELLER_OVERLAY_NO_CONTAINER_BASE}banner-card.png`,
   },
 };
 
@@ -118,6 +131,28 @@ const newArrivalKspBoxes = {
   "IG Story": { x: 135, y: 675, width: 810, height: 150, maxSize: 68, minSize: 34 },
   "FB Post": { x: 72, y: 420, width: 474, height: 110, maxSize: 50, minSize: 28 },
   "Banner Card": { x: 70, y: 270, width: 392, height: 90, maxSize: 42, minSize: 24 },
+};
+
+// Full per-format layout override for the 8.8 Paying Seller template — its
+// KV/product split and logo/KSP positions differ from Mall BAU (the 8.8
+// badge and campaign artwork take up more room), measured directly off the
+// design files at each format's canvas resolution. Only Category Banner and
+// Banner Card have artwork, matching the two outputs this template allows.
+const payingSellerLayouts = {
+  "Category Banner": {
+    kv: { x: 0, y: 0, width: 581, height: 360 },
+    product: { x: 581, y: 0, width: 1200 - 581, height: 360 },
+    logo: { x: 126, y: 79, width: 322, height: 107, radius: 19 },
+    ksp: { x: 126, y: 205, width: 320, height: 125, maxSize: 58.67, minSize: 34 },
+    productAlign: [0.62, 0.58],
+  },
+  "Banner Card": {
+    kv: { x: 0, y: 0, width: 531, height: 381 },
+    product: { x: 0, y: 381, width: 531, height: 792 - 381 },
+    logo: { x: 115, y: 100, width: 300, height: 100, radius: 18 },
+    ksp: { x: 110, y: 222, width: 314, height: 100, maxSize: 42, minSize: 24 },
+    productAlign: [0.5, 0.42],
+  },
 };
 
 const externalShopeeLogoBoxes = {
@@ -205,6 +240,8 @@ const els = {
   colorDot: document.querySelector("#colorDot"),
   colorCanvas: document.querySelector("#colorCanvas"),
   swatchGrid: document.querySelector("#swatchGrid"),
+  colorPicker: document.querySelector("#colorPicker"),
+  kvColorHint: document.querySelector("#kvColorHint"),
   outputButtons: document.querySelector("#outputButtons"),
   generateButton: document.querySelector("#generateButton"),
   downloadAllButton: document.querySelector("#downloadAllButton"),
@@ -732,7 +769,7 @@ function drawFallbackBrand(ctx, box) {
   ctx.fillText("cottonseeds", box.x + box.width / 2, box.y + box.height / 2);
 }
 
-function drawBrandLogo(ctx, image, box) {
+function drawBrandLogo(ctx, image, box, context = state) {
   ctx.save();
   roundRect(ctx, box.x, box.y, box.width, box.height, box.radius);
   ctx.clip();
@@ -748,19 +785,24 @@ function drawBrandLogo(ctx, image, box) {
       box.width - insetX * 2,
       box.height - insetY * 2,
     );
-  } else if (!state.hideLogoContainer) {
+  } else if (!context.hideLogoContainer) {
     drawFallbackBrand(ctx, box);
   }
 
   ctx.restore();
 }
 
-function getLayout(format) {
+function getLayout(format, context = state) {
   const { width: w, height: h } = format;
-  const newArrivalLogo = state.template === "Mall BAU New Arrival"
+
+  if (context.template === PAYING_SELLER_TEMPLATE && payingSellerLayouts[format.title]) {
+    return payingSellerLayouts[format.title];
+  }
+
+  const newArrivalLogo = context.template === "Mall BAU New Arrival"
     ? newArrivalLogoBoxes[format.title]
     : null;
-  const newArrivalKsp = state.template === "Mall BAU New Arrival"
+  const newArrivalKsp = context.template === "Mall BAU New Arrival"
     ? newArrivalKspBoxes[format.title]
     : null;
 
@@ -833,12 +875,17 @@ function getLayout(format) {
   };
 }
 
-function drawBackground(ctx, format) {
-  const layout = getLayout(format);
+function drawBackground(ctx, format, context = state) {
+  const layout = getLayout(format, context);
   ctx.fillStyle = "#FFF3F6";
   ctx.fillRect(0, 0, format.width, format.height);
-  ctx.fillStyle = state.kvColor;
-  ctx.fillRect(layout.kv.x, layout.kv.y, layout.kv.width, layout.kv.height);
+  // 8.8 Paying Seller's KV area is a fixed campaign image baked into the
+  // overlay (drawn later, fully opaque there), not a flat color — so there's
+  // nothing for the KV color to control and nothing to fill here.
+  if (context.template !== PAYING_SELLER_TEMPLATE) {
+    ctx.fillStyle = context.kvColor;
+    ctx.fillRect(layout.kv.x, layout.kv.y, layout.kv.width, layout.kv.height);
+  }
   return layout;
 }
 
@@ -871,7 +918,7 @@ function getSkuPosition(outputId, layout = null, image = null, context = state) 
   const savedPosition = context.skuPositions[outputId];
   if (savedPosition) return savedPosition;
 
-  const currentLayout = layout || getLayout(outputMeta[outputId]);
+  const currentLayout = layout || getLayout(outputMeta[outputId], context);
   return getDefaultLayerOffset(image, currentLayout, currentLayout.productAlign);
 }
 
@@ -890,55 +937,55 @@ function setSkuZoom(outputId, zoom, context = state) {
   context.skuZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
 }
 
-function hasSkuBackground() {
-  return state.skuBackgroundIndex >= 0 && state.skuBackgroundIndex < SKU_BACKGROUNDS.length;
+function hasSkuBackground(context = state) {
+  return context.skuBackgroundIndex >= 0 && context.skuBackgroundIndex < SKU_BACKGROUNDS.length;
 }
 
-function getSkuBackgroundSrc() {
-  return hasSkuBackground() ? SKU_BACKGROUNDS[state.skuBackgroundIndex].src : "";
+function getSkuBackgroundSrc(context = state) {
+  return hasSkuBackground(context) ? SKU_BACKGROUNDS[context.skuBackgroundIndex].src : "";
 }
 
-function getSkuBackgroundLabel() {
-  return hasSkuBackground() ? SKU_BACKGROUNDS[state.skuBackgroundIndex].label : "None";
+function getSkuBackgroundLabel(context = state) {
+  return hasSkuBackground(context) ? SKU_BACKGROUNDS[context.skuBackgroundIndex].label : "None";
 }
 
 // Selection cycles through "None" plus every background, wrapping in both
 // directions: -1 (None), 0, 1, ... N-1, back to -1.
-function cycleSkuBackground(direction) {
+function cycleSkuBackground(direction, context = state) {
   const total = SKU_BACKGROUNDS.length + 1;
-  const currentSlot = state.skuBackgroundIndex + 1;
+  const currentSlot = context.skuBackgroundIndex + 1;
   const nextSlot = (currentSlot + direction + total) % total;
-  state.skuBackgroundIndex = nextSlot - 1;
-  if (!hasSkuBackground()) resetActiveLayers();
+  context.skuBackgroundIndex = nextSlot - 1;
+  if (!hasSkuBackground(context)) resetActiveLayers(context);
 }
 
-function getSkuBackgroundPosition(outputId, layout = null, image = null) {
-  const savedPosition = state.skuBackgroundPositions[outputId];
+function getSkuBackgroundPosition(outputId, layout = null, image = null, context = state) {
+  const savedPosition = context.skuBackgroundPositions[outputId];
   if (savedPosition) return savedPosition;
 
-  const currentLayout = layout || getLayout(outputMeta[outputId]);
+  const currentLayout = layout || getLayout(outputMeta[outputId], context);
   return getDefaultLayerOffset(image, currentLayout, currentLayout.productAlign);
 }
 
-function setSkuBackgroundPosition(outputId, position) {
-  state.skuBackgroundPositions[outputId] = {
+function setSkuBackgroundPosition(outputId, position, context = state) {
+  context.skuBackgroundPositions[outputId] = {
     x: Number.isFinite(position.x) ? position.x : 0,
     y: Number.isFinite(position.y) ? position.y : 0,
   };
 }
 
-function getSkuBackgroundZoom(outputId) {
-  return state.skuBackgroundZooms[outputId] || SKU_ZOOM_DEFAULT;
+function getSkuBackgroundZoom(outputId, context = state) {
+  return context.skuBackgroundZooms[outputId] || SKU_ZOOM_DEFAULT;
 }
 
-function setSkuBackgroundZoom(outputId, zoom) {
-  state.skuBackgroundZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
+function setSkuBackgroundZoom(outputId, zoom, context = state) {
+  context.skuBackgroundZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
 }
 
 // Registry so drag/zoom code can operate on "whichever layer is active"
-// without branching everywhere. The background side always reads/writes
-// the global state (it's shared across the whole batch, not per-row); the
-// sku side is bound to whichever context is passed in.
+// without branching everywhere. Both the SKU photo and the background are
+// bound to whichever context is passed in — each row (or the single
+// editor's `state`) carries its own independent copy of everything.
 function getSkuLayers(context = state) {
   return {
     sku: {
@@ -949,11 +996,12 @@ function getSkuLayers(context = state) {
       setZoom: (outputId, zoom) => setSkuZoom(outputId, zoom, context),
     },
     background: {
-      getImageUrl: () => getSkuBackgroundSrc(),
-      getPosition: getSkuBackgroundPosition,
-      setPosition: setSkuBackgroundPosition,
-      getZoom: getSkuBackgroundZoom,
-      setZoom: setSkuBackgroundZoom,
+      getImageUrl: () => getSkuBackgroundSrc(context),
+      getPosition: (outputId, layout, image) =>
+        getSkuBackgroundPosition(outputId, layout, image, context),
+      setPosition: (outputId, position) => setSkuBackgroundPosition(outputId, position, context),
+      getZoom: (outputId) => getSkuBackgroundZoom(outputId, context),
+      setZoom: (outputId, zoom) => setSkuBackgroundZoom(outputId, zoom, context),
     },
   };
 }
@@ -972,15 +1020,25 @@ function resetActiveLayers(context = state) {
   });
 }
 
-function getOverlaySrc(format) {
-  if (state.template === "Mall BAU New Arrival") {
-    if (state.hideLogoContainer && format.newArrivalOverlayNoContainer) {
+function getOverlaySrc(format, context = state) {
+  if (context.template === PAYING_SELLER_TEMPLATE) {
+    // Only Category Banner and Banner Card have Paying Seller artwork; fall
+    // back to the standard overlay for any other format (shouldn't normally
+    // render since those outputs are disabled for this template).
+    if (context.hideLogoContainer && format.payingSellerOverlayNoContainer) {
+      return format.payingSellerOverlayNoContainer;
+    }
+    return format.payingSellerOverlay || format.overlay;
+  }
+
+  if (context.template === "Mall BAU New Arrival") {
+    if (context.hideLogoContainer && format.newArrivalOverlayNoContainer) {
       return format.newArrivalOverlayNoContainer;
     }
     return format.newArrivalOverlay;
   }
 
-  if (state.hideLogoContainer && format.overlayNoContainer) return format.overlayNoContainer;
+  if (context.hideLogoContainer && format.overlayNoContainer) return format.overlayNoContainer;
   return format.overlay;
 }
 
@@ -997,25 +1055,25 @@ async function drawOutput(outputId, canvas, options = {}) {
   await ensureFont();
 
   const shouldUseOrangeShopeeLogo =
-    state.useOrangeShopeeLogo && EXTERNAL_SHOPEE_LOGO_OUTPUTS.has(outputId);
+    context.useOrangeShopeeLogo && EXTERNAL_SHOPEE_LOGO_OUTPUTS.has(outputId);
   // Applies on every format (not just IG Story / FB Post) since the New
   // Arrival badge shows up on all of them, unlike the Shopee icon swap.
   const shouldUseColorNewArrivalLogo =
-    state.useOrangeShopeeLogo &&
-    state.template === "Mall BAU New Arrival" &&
+    context.useOrangeShopeeLogo &&
+    context.template === "Mall BAU New Arrival" &&
     Boolean(newArrivalLogoColorBoxes[outputId]);
   const [brandLogo, skuImage, overlay, orangeShopeeLogo, backgroundImage, newArrivalLogoColor] =
     await Promise.all([
       loadImage(context.brandLogoUrl),
       photoOverride ? Promise.resolve(null) : loadImage(context.skuImageUrl),
-      loadImage(getOverlaySrc(format)),
+      loadImage(getOverlaySrc(format, context)),
       loadImage(shouldUseOrangeShopeeLogo ? ORANGE_SHOPEE_LOGO_URL : ""),
-      photoOverride ? Promise.resolve(null) : loadImage(getSkuBackgroundSrc()),
+      photoOverride ? Promise.resolve(null) : loadImage(getSkuBackgroundSrc(context)),
       loadImage(shouldUseColorNewArrivalLogo ? NEW_ARRIVAL_LOGO_COLOR_URL : ""),
     ]);
 
   ctx.clearRect(0, 0, format.width, format.height);
-  const layout = drawBackground(ctx, format);
+  const layout = drawBackground(ctx, format, context);
 
   ctx.save();
   ctx.beginPath();
@@ -1036,8 +1094,8 @@ async function drawOutput(outputId, canvas, options = {}) {
     if (backgroundImage) {
       // Drawn first so a transparent-background SKU photo shows it through;
       // an opaque SKU photo will simply cover it entirely.
-      const bgPosition = getSkuBackgroundPosition(outputId, layout, backgroundImage);
-      const bgZoom = getSkuBackgroundZoom(outputId);
+      const bgPosition = getSkuBackgroundPosition(outputId, layout, backgroundImage, context);
+      const bgZoom = getSkuBackgroundZoom(outputId, context);
       drawCover(
         ctx,
         backgroundImage,
@@ -1071,7 +1129,7 @@ async function drawOutput(outputId, canvas, options = {}) {
   if (shouldUseOrangeShopeeLogo && orangeShopeeLogo) {
     const clearBox = externalShopeeLogoClearBoxes[outputId];
     const logoBox = externalShopeeLogoBoxes[outputId];
-    ctx.fillStyle = state.kvColor;
+    ctx.fillStyle = context.kvColor;
     ctx.fillRect(clearBox.x, clearBox.y, clearBox.width, clearBox.height);
     // drawContain (not a stretch) keeps the asset's own aspect ratio intact,
     // fitting and centering it inside the box instead of distorting it.
@@ -1084,7 +1142,7 @@ async function drawOutput(outputId, canvas, options = {}) {
     // exact same spot — position/size never change, only the asset does.
     const naClearBox = newArrivalLogoColorClearBoxes[outputId];
     const naLogoBox = newArrivalLogoColorBoxes[outputId];
-    ctx.fillStyle = state.kvColor;
+    ctx.fillStyle = context.kvColor;
     ctx.fillRect(naClearBox.x, naClearBox.y, naClearBox.width, naClearBox.height);
     drawContain(
       ctx,
@@ -1095,9 +1153,9 @@ async function drawOutput(outputId, canvas, options = {}) {
       naLogoBox.height,
     );
   }
-  drawBrandLogo(ctx, brandLogo, layout.logo);
+  drawBrandLogo(ctx, brandLogo, layout.logo, context);
   drawFittedText(ctx, context.ksp, layout.ksp, {
-    color: state.kspColor,
+    color: context.kspColor,
     maxSize: layout.ksp.maxSize,
     minSize: 10,
   });
@@ -1122,7 +1180,7 @@ function pointInsideBox(point, box) {
 
 function updateLayerPositionFromDrag(outputId, layerKey, image, deltaX, deltaY, context = state) {
   const format = outputMeta[outputId];
-  const layout = getLayout(format);
+  const layout = getLayout(format, context);
   const layer = getSkuLayers(context)[layerKey];
   const position = layer.getPosition(outputId, layout, image);
 
@@ -1154,7 +1212,7 @@ function bindSkuDrag(canvas, outputId, context = state) {
   canvas.addEventListener("pointerdown", async (event) => {
     if (event.button !== 0) return;
 
-    const layout = getLayout(outputMeta[outputId]);
+    const layout = getLayout(outputMeta[outputId], context);
     const point = canvasPointFromEvent(canvas, event);
     if (!pointInsideBox(point, layout.product)) return;
 
@@ -1221,7 +1279,7 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
   const activeLayer = getSkuLayers(context)[activeLayerKey];
   const isBackgroundActive = activeLayerKey === "background";
 
-  if (hasSkuBackground()) {
+  if (hasSkuBackground(context)) {
     const layerSwitch = document.createElement("div");
     layerSwitch.className = "layer-switch";
     layerSwitch.setAttribute("role", "group");
@@ -1289,7 +1347,9 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
   shell.className = "canvas-shell";
   canvas = document.createElement("canvas");
   canvas.className = "asset-canvas";
-  const activeLayerHasImage = isBackgroundActive ? hasSkuBackground() : Boolean(context.skuImageUrl);
+  const activeLayerHasImage = isBackgroundActive
+    ? hasSkuBackground(context)
+    : Boolean(context.skuImageUrl);
   if (activeLayerHasImage) canvas.classList.add("can-drag");
   canvas.dataset.output = outputId;
   canvas.setAttribute("aria-label", `${format.title} preview`);
@@ -1303,10 +1363,9 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
 async function renderPreviews() {
   const currentVersion = ++renderVersion;
   els.previewList.innerHTML = "";
-  document.documentElement.style.setProperty("--kv", state.kvColor);
-  els.templateLabel.textContent = state.template;
-
   const context = editingContext();
+  document.documentElement.style.setProperty("--kv", context.kvColor);
+  els.templateLabel.textContent = context.template;
   const selected = editingOutputs();
 
   if (!selected.length) {
@@ -1344,7 +1403,8 @@ function drawColorCanvas() {
   }
 
   const { width, height } = canvas;
-  const hueColor = rgbToHex(hsvToRgb(state.hue, 1, 1));
+  const context = editingContext();
+  const hueColor = rgbToHex(hsvToRgb(context.hue, 1, 1));
   const markerRadius = 7 * ratio;
   const markerOuterRadius = 8.5 * ratio;
 
@@ -1364,8 +1424,8 @@ function drawColorCanvas() {
   ctx.fillStyle = blackGradient;
   ctx.fillRect(0, 0, width, height);
 
-  const x = state.saturation * width;
-  const y = (1 - state.value) * height;
+  const x = context.saturation * width;
+  const y = (1 - context.value) * height;
   ctx.beginPath();
   ctx.arc(x, y, markerRadius, 0, Math.PI * 2);
   ctx.lineWidth = 2 * ratio;
@@ -1379,29 +1439,31 @@ function drawColorCanvas() {
 }
 
 function updateColorFromCanvas(event) {
+  const context = editingContext();
   const rect = els.colorCanvas.getBoundingClientRect();
   const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width);
   const y = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
-  state.saturation = x / rect.width;
-  state.value = 1 - y / rect.height;
-  setColor(rgbToHex(hsvToRgb(state.hue, state.saturation, state.value)), false);
+  context.saturation = x / rect.width;
+  context.value = 1 - y / rect.height;
+  setColor(rgbToHex(hsvToRgb(context.hue, context.saturation, context.value)), false);
 }
 
 function setColor(hex, syncFromHex = true) {
   const normalized = hex.startsWith("#") ? hex.toUpperCase() : `#${hex.toUpperCase()}`;
   if (!isHex(normalized)) return;
 
-  state.kvColor = normalized;
+  const context = editingContext();
+  context.kvColor = normalized;
   els.nativeColor.value = normalized;
   els.hexInput.value = normalized;
   els.colorDot.style.background = normalized;
 
   if (syncFromHex) {
     const hsv = rgbToHsv(hexToRgb(normalized));
-    state.hue = hsv.h;
-    state.saturation = hsv.s;
-    state.value = hsv.v;
-    els.hueRange.value = String(Math.round(state.hue));
+    context.hue = hsv.h;
+    context.saturation = hsv.s;
+    context.value = hsv.v;
+    els.hueRange.value = String(Math.round(context.hue));
   }
 
   renderSwatchCurrent();
@@ -1413,7 +1475,7 @@ function setKspColor(hex) {
   const normalized = hex.startsWith("#") ? hex.toUpperCase() : `#${hex.toUpperCase()}`;
   if (!isHex(normalized)) return;
 
-  state.kspColor = normalized;
+  editingContext().kspColor = normalized;
   els.kspColorInput.value = normalized;
   els.kspColorHex.value = normalized;
   els.kspColorDot.style.background = normalized;
@@ -1437,7 +1499,7 @@ function renderSwatches() {
 }
 
 function renderSwatchCurrent() {
-  const current = toCssRgb(state.kvColor);
+  const current = toCssRgb(editingContext().kvColor);
   els.swatchGrid.querySelectorAll("button").forEach((button) => {
     button.setAttribute(
       "aria-current",
@@ -1474,14 +1536,47 @@ function syncOutputButtons() {
   });
 }
 
+// Returns the Set of output ids a template allows, or null when every output
+// is allowed. 8.8 Paying Seller only has artwork for two formats.
+function allowedOutputsForTemplate(template) {
+  return template === PAYING_SELLER_TEMPLATE ? PAYING_SELLER_OUTPUTS : null;
+}
+
+// Disables/greys out output-grid buttons that the given context's template
+// doesn't support, auto-deselecting any that were already selected. Returns
+// true if it had to drop a selection, so callers can decide whether to
+// re-render anything that shows the output selection elsewhere (bulk rows).
+function syncOutputAvailability(context) {
+  const allowed = allowedOutputsForTemplate(context.template);
+  let changed = false;
+
+  if (allowed) {
+    context.outputs.forEach((outputId) => {
+      if (!allowed.has(outputId)) {
+        context.outputs.delete(outputId);
+        changed = true;
+      }
+    });
+  }
+
+  els.outputButtons.querySelectorAll("button[data-output]").forEach((button) => {
+    button.disabled = Boolean(allowed) && !allowed.has(button.dataset.output);
+  });
+
+  if (changed) syncOutputButtons();
+  return changed;
+}
+
 function syncKspCount() {
   els.kspCount.textContent = `${editingContext().ksp.length}/${KSP_MAX_CHARACTERS}`;
 }
 
-// Populates the sidebar's display-only fields (KSP text, image filenames,
-// output selection) from whichever context is currently active. Template,
-// KV color, toggles, and SKU background stay put — they're shared globally
-// and every context already reads them straight from `state`.
+// Populates every sidebar display field — KSP text + color, image
+// filenames, output selection, template, KV color, toggles, and SKU
+// background — from whichever context is currently active (the single
+// editor's `state`, or a bulk row). Called whenever the main editor
+// switches which one it's pointed at, so the sidebar always shows that
+// context's own values.
 function syncEditorFieldsFromContext() {
   const context = editingContext();
   els.kspInput.value = context.ksp;
@@ -1489,6 +1584,36 @@ function syncEditorFieldsFromContext() {
   els.brandFileName.textContent = context.brandLogoLabel || "Upload";
   els.skuFileName.textContent = context.skuImageLabel || "Upload";
   syncOutputButtons();
+
+  els.templateSelect.value = context.template;
+  els.logoContainerToggle.checked = context.hideLogoContainer;
+  els.shopeeLogoToggle.checked = context.useOrangeShopeeLogo;
+  syncOutputAvailability(context);
+
+  els.kspColorInput.value = context.kspColor;
+  els.kspColorHex.value = context.kspColor;
+  els.kspColorDot.style.background = context.kspColor;
+
+  els.nativeColor.value = context.kvColor;
+  els.hexInput.value = context.kvColor;
+  els.colorDot.style.background = context.kvColor;
+  els.hueRange.value = String(Math.round(context.hue));
+  renderSwatchCurrent();
+  drawColorCanvas();
+
+  syncKvColorAvailability(context);
+  renderBackgroundPicker();
+}
+
+// 8.8 Paying Seller's background is a fixed campaign image, so KV Color has
+// nothing to control there — disable the picker and explain why.
+function syncKvColorAvailability(context) {
+  const disabled = context.template === PAYING_SELLER_TEMPLATE;
+  els.colorPicker?.classList.toggle("is-disabled", disabled);
+  if (els.kvColorHint) els.kvColorHint.hidden = !disabled;
+  [els.nativeColor, els.hexInput, els.hueRange].forEach((input) => {
+    if (input) input.disabled = disabled;
+  });
 }
 
 function selectedOutputs() {
@@ -1578,7 +1703,15 @@ function createDetailLimitedCanvas(canvas, scale) {
   return detailCanvas;
 }
 
-const PHOTO_SOFTEN_QUALITIES = [0.92, 0.82, 0.7, 0.58, 0.46, 0.34, 0.24, 0.16, 0.1, 0.06, 0.03];
+// Only tries down to a moderate quality floor. Measured with a busy test photo:
+// re-embedding a JPEG-softened photo losslessly into a full PNG barely shrinks at
+// all as quality drops (PNG's DEFLATE can't exploit JPEG's frequency-domain
+// compression), so pushing this ladder past ~0.4-0.5 wastes time and, for anything
+// but very simple/plain photos, never actually gets under budget until it hits
+// catastrophic quality. Better to fail fast here and let createExportFile move on
+// to a full-canvas JPEG pass, which compresses busy photos far more efficiently
+// and still keeps the ribbon/logo/text looking clean at a reasonable quality.
+const PHOTO_SOFTEN_QUALITIES = [0.92, 0.82, 0.7, 0.58, 0.46];
 
 // Renders only the SKU photo (the sole photographic, high-entropy region of the banner)
 // into its own canvas at the exact size it occupies in the final output. Optionally passes
@@ -1588,10 +1721,10 @@ const PHOTO_SOFTEN_QUALITIES = [0.92, 0.82, 0.7, 0.58, 0.46, 0.34, 0.24, 0.16, 0
 // so keeping those pixels out of any lossy step is what keeps them crisp.
 async function createPhotoLayer(outputId, quality, context = state) {
   const format = outputMeta[outputId];
-  const layout = getLayout(format);
+  const layout = getLayout(format, context);
   const [skuImage, backgroundImage] = await Promise.all([
     loadImage(context.skuImageUrl),
-    loadImage(getSkuBackgroundSrc()),
+    loadImage(getSkuBackgroundSrc(context)),
   ]);
 
   const photoCanvas = document.createElement("canvas");
@@ -1604,8 +1737,8 @@ async function createPhotoLayer(outputId, quality, context = state) {
   photoCtx.fillRect(0, 0, photoCanvas.width, photoCanvas.height);
 
   if (backgroundImage) {
-    const bgPosition = getSkuBackgroundPosition(outputId, layout, backgroundImage);
-    const bgZoom = getSkuBackgroundZoom(outputId);
+    const bgPosition = getSkuBackgroundPosition(outputId, layout, backgroundImage, context);
+    const bgZoom = getSkuBackgroundZoom(outputId, context);
     drawCover(
       photoCtx,
       backgroundImage,
@@ -1662,8 +1795,12 @@ async function renderPngWithSoftenedPhoto(outputId, quality, context = state) {
   return exportCanvas;
 }
 
-async function createLossyExport(canvas, format) {
-  const sourceCanvas = format.type === "image/jpeg" ? createOpaqueCanvas(canvas) : canvas;
+// Binary-searches for the highest JPEG quality that still fits under the
+// byte budget for a given (already-rendered) canvas. Shared by the
+// full-resolution lossy pass and the emergency detail-reduced pass below,
+// so every resolution tier gets the best quality available at that size
+// instead of always dropping straight to the worst possible quality.
+async function findBestQualityFile(sourceCanvas, format) {
   let low = format.minQuality;
   let high = format.maxQuality;
   let bestUnderLimit = null;
@@ -1708,6 +1845,17 @@ async function createLossyExport(canvas, format) {
   return bestUnderLimit || smallestFile;
 }
 
+async function createLossyExport(canvas, format) {
+  const sourceCanvas = format.type === "image/jpeg" ? createOpaqueCanvas(canvas) : canvas;
+  return findBestQualityFile(sourceCanvas, format);
+}
+
+// Last resort when even a full-resolution JPEG at the lowest quality can't
+// fit the byte budget. Steps resolution down gradually, but at each step
+// still searches for the *best* quality that fits rather than jumping
+// straight to the worst quality — a modest resolution trim plus a
+// reasonable quality usually looks far better than the same resolution
+// crushed to minimum quality.
 async function createEmergencyExport(canvas) {
   let smallestFile = null;
 
@@ -1716,18 +1864,11 @@ async function createEmergencyExport(canvas) {
     for (const format of LOSSY_EXPORT_FORMATS) {
       const sourceCanvas =
         format.type === "image/jpeg" ? createOpaqueCanvas(detailCanvas) : detailCanvas;
-      const blob = await encodeCanvas(sourceCanvas, format.type, format.minQuality);
-      if (!blob) continue;
+      const file = await findBestQualityFile(sourceCanvas, format);
+      if (!file) continue;
 
-      const file = {
-        blob,
-        extension: format.extension,
-        label: format.label,
-        quality: format.minQuality,
-      };
-
-      if (!smallestFile || blob.size < smallestFile.blob.size) smallestFile = file;
-      if (blob.size <= EXPORT_TARGET_BYTES) return file;
+      if (!smallestFile || file.blob.size < smallestFile.blob.size) smallestFile = file;
+      if (file.blob.size <= EXPORT_TARGET_BYTES) return file;
     }
   }
 
@@ -2108,6 +2249,12 @@ function createBulkRowsFromCsv(text) {
   const columns = headerRecognized ? detected : { ksp: 0, brandLogo: 1, skuImage: 2 };
   const dataRows = headerRecognized ? table.slice(1) : table;
 
+  const rowTemplate = state.template;
+  const rowAllowedOutputs = allowedOutputsForTemplate(rowTemplate);
+  const defaultOutputs = rowAllowedOutputs
+    ? new Set([...bulkState.defaultOutputs].filter((outputId) => rowAllowedOutputs.has(outputId)))
+    : new Set(bulkState.defaultOutputs);
+
   return dataRows.map((cells) => {
     const kspRaw = (cells[columns.ksp] || "").trim();
     return {
@@ -2115,12 +2262,15 @@ function createBulkRowsFromCsv(text) {
       kspRaw,
       brandLogoRaw: (cells[columns.brandLogo] || "").trim(),
       skuImageRaw: (cells[columns.skuImage] || "").trim(),
-      outputs: new Set(bulkState.defaultOutputs),
+      outputs: new Set(defaultOutputs),
       status: "pending",
       statusLabel: "Ready",
       // Each row is its own self-contained editing context — same shape the
       // shared render pipeline expects from `state` — so a row can be
       // previewed/edited independently without touching the single editor.
+      // Template/KV color/toggles/background start as a copy of whatever
+      // the sidebar currently has, then become fully independent per row
+      // once you preview/edit that row and change any of them.
       brandLogoUrl: "",
       brandLogoLabel: "",
       skuImageUrl: "",
@@ -2129,6 +2279,17 @@ function createBulkRowsFromCsv(text) {
       skuPositions: {},
       skuZooms: {},
       activeLayerByOutput: {},
+      template: state.template,
+      hideLogoContainer: state.hideLogoContainer,
+      useOrangeShopeeLogo: state.useOrangeShopeeLogo,
+      kvColor: state.kvColor,
+      kspColor: state.kspColor,
+      hue: state.hue,
+      saturation: state.saturation,
+      value: state.value,
+      skuBackgroundIndex: state.skuBackgroundIndex,
+      skuBackgroundPositions: {},
+      skuBackgroundZooms: {},
       resolved: false,
       resolving: null,
       imagesFailed: false,
@@ -2242,15 +2403,19 @@ function createBulkRowElement(row, index) {
   ksp.textContent = row.kspRaw || "(no KSP text)";
   main.append(title, ksp);
 
+  const rowAllowedOutputs = allowedOutputsForTemplate(row.template);
+
   const outputsRow = document.createElement("div");
   outputsRow.className = "chip-row bulk-row-outputs";
   BULK_OUTPUT_IDS.forEach((outputId) => {
+    const isAllowed = !rowAllowedOutputs || rowAllowedOutputs.has(outputId);
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip-button sm";
     chip.dataset.output = outputId;
     chip.textContent = outputMeta[outputId].title;
-    chip.classList.toggle("is-active", row.outputs.has(outputId));
+    chip.disabled = !isAllowed;
+    chip.classList.toggle("is-active", isAllowed && row.outputs.has(outputId));
     chip.addEventListener("click", () => {
       if (row.outputs.has(outputId)) row.outputs.delete(outputId);
       else row.outputs.add(outputId);
@@ -2415,8 +2580,12 @@ async function generateBulk() {
 }
 
 els.templateSelect.addEventListener("change", (event) => {
-  state.template = event.target.value;
+  const context = editingContext();
+  context.template = event.target.value;
+  syncKvColorAvailability(context);
+  syncOutputAvailability(context);
   renderPreviews();
+  if (activeRow) renderBulkRows();
 });
 
 els.brandLogoInput.addEventListener("change", () => {
@@ -2424,12 +2593,12 @@ els.brandLogoInput.addEventListener("change", () => {
 });
 
 els.logoContainerToggle.addEventListener("change", (event) => {
-  state.hideLogoContainer = event.target.checked;
+  editingContext().hideLogoContainer = event.target.checked;
   renderPreviews();
 });
 
 els.shopeeLogoToggle.addEventListener("change", (event) => {
-  state.useOrangeShopeeLogo = event.target.checked;
+  editingContext().useOrangeShopeeLogo = event.target.checked;
   renderPreviews();
 });
 
@@ -2450,25 +2619,28 @@ els.skuLink.addEventListener("keydown", (event) => {
 els.loadSkuLinkButton.addEventListener("click", loadSkuImageFromInput);
 
 function renderBackgroundPicker() {
-  const hasBg = hasSkuBackground();
+  const context = editingContext();
+  const hasBg = hasSkuBackground(context);
   if (els.bgSwatch) {
-    els.bgSwatch.style.backgroundImage = hasBg ? `url("${getSkuBackgroundSrc()}")` : "";
+    els.bgSwatch.style.backgroundImage = hasBg ? `url("${getSkuBackgroundSrc(context)}")` : "";
     els.bgSwatch.classList.toggle("is-empty", !hasBg);
   }
-  if (els.bgName) els.bgName.textContent = getSkuBackgroundLabel();
+  if (els.bgName) els.bgName.textContent = getSkuBackgroundLabel(context);
   if (els.bgCount) {
-    els.bgCount.textContent = hasBg ? `${state.skuBackgroundIndex + 1}/${SKU_BACKGROUNDS.length}` : "";
+    els.bgCount.textContent = hasBg
+      ? `${context.skuBackgroundIndex + 1}/${SKU_BACKGROUNDS.length}`
+      : "";
   }
 }
 
 els.bgPrevButton?.addEventListener("click", () => {
-  cycleSkuBackground(-1);
+  cycleSkuBackground(-1, editingContext());
   renderBackgroundPicker();
   renderPreviews();
 });
 
 els.bgNextButton?.addEventListener("click", () => {
-  cycleSkuBackground(1);
+  cycleSkuBackground(1, editingContext());
   renderBackgroundPicker();
   renderPreviews();
 });
@@ -2509,8 +2681,9 @@ els.hexInput.addEventListener("input", (event) => {
 });
 
 els.hueRange.addEventListener("input", (event) => {
-  state.hue = Number(event.target.value);
-  const nextColor = rgbToHex(hsvToRgb(state.hue, state.saturation, state.value));
+  const context = editingContext();
+  context.hue = Number(event.target.value);
+  const nextColor = rgbToHex(hsvToRgb(context.hue, context.saturation, context.value));
   setColor(nextColor, false);
 });
 
@@ -2646,6 +2819,8 @@ els.themeToggle?.addEventListener("click", () => {
 
 renderSwatches();
 syncOutputButtons();
+syncOutputAvailability(state);
+syncKvColorAvailability(state);
 syncKspCount();
 drawColorCanvas();
 setKspColor(state.kspColor);

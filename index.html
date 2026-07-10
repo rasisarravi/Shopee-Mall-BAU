@@ -95,6 +95,7 @@
               <select id="templateSelect" name="template">
                 <option>Mall BAU</option>
                 <option>Mall BAU New Arrival</option>
+                <option>8.8 Paying Seller</option>
               </select>
             </div>
           </div>
@@ -199,9 +200,9 @@
             </div>
           </div>
 
-          <div class="form-row color-row">
+          <div class="form-row color-row" id="kvColorRow">
             <label for="hexInput">KV Color</label>
-            <div class="color-picker span-wide">
+            <div class="color-picker span-wide" id="colorPicker">
               <div class="picker-top">
                 <div class="swatch-grid" id="swatchGrid" aria-label="Color swatches"></div>
                 <canvas
@@ -228,6 +229,9 @@
                 </label>
               </div>
             </div>
+            <p class="field-hint" id="kvColorHint" hidden>
+              8.8 Paying Seller uses a fixed campaign background — KV Color has no effect on this template.
+            </p>
           </div>
 
           <div class="form-row output-row">

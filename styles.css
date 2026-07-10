@@ -694,6 +694,11 @@ input[type="file"] {
   padding: 10px;
 }
 
+.color-picker.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .picker-top {
   display: grid;
   grid-template-columns: 116px minmax(0, 1fr);
@@ -947,6 +952,12 @@ input[type="file"] {
   background: var(--output-selected-bg);
   color: var(--shopee);
   box-shadow: inset 0 0 0 1px var(--output-selected-shadow);
+}
+
+.output-grid button:disabled,
+.chip-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .generate-button,
