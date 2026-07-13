@@ -214,6 +214,10 @@ const state = {
   skuBackgroundIndex: -1, // -1 = "None"; 0..N-1 indexes into SKU_BACKGROUNDS
   skuBackgroundPositions: {},
   skuBackgroundZooms: {},
+  // Flat fill behind the product area when SKU Background is "None" (and a
+  // transparent-background SKU photo doesn't cover it). Matches the previous
+  // hardcoded look by default; only editable while no scene is selected.
+  skuBackgroundColor: "#FFF3F6",
   // Per-output, UI-only: which layer (sku or background) the canvas drag +
   // zoom slider currently controls. Every render "context" (the single
   // editor's `state`, or a bulk row acting as its own context) carries its
@@ -237,11 +241,23 @@ const els = {
   loadSkuLinkButton: document.querySelector("#loadSkuLinkButton"),
   removeBgButton: document.querySelector("#removeBgButton"),
   removeBgError: document.querySelector("#removeBgError"),
-  bgPrevButton: document.querySelector("#bgPrevButton"),
-  bgNextButton: document.querySelector("#bgNextButton"),
-  bgSwatch: document.querySelector("#bgSwatch"),
-  bgName: document.querySelector("#bgName"),
-  bgCount: document.querySelector("#bgCount"),
+  editSkuButton: document.querySelector("#editSkuButton"),
+  editSkuOverlay: document.querySelector("#editSkuOverlay"),
+  editSkuCloseButton: document.querySelector("#editSkuCloseButton"),
+  editSkuEraseButton: document.querySelector("#editSkuEraseButton"),
+  editSkuRestoreButton: document.querySelector("#editSkuRestoreButton"),
+  editSkuBrushSize: document.querySelector("#editSkuBrushSize"),
+  editSkuResetButton: document.querySelector("#editSkuResetButton"),
+  editSkuCanvas: document.querySelector("#editSkuCanvas"),
+  editSkuCancelButton: document.querySelector("#editSkuCancelButton"),
+  editSkuSaveButton: document.querySelector("#editSkuSaveButton"),
+  editSkuBrushCursor: document.querySelector("#editSkuBrushCursor"),
+  bgThumbGrid: document.querySelector("#bgThumbGrid"),
+  skuBgColorRow: document.querySelector("#skuBgColorRow"),
+  skuBgColorInput: document.querySelector("#skuBgColorInput"),
+  skuBgColorHex: document.querySelector("#skuBgColorHex"),
+  skuBgColorDot: document.querySelector("#skuBgColorDot"),
+  skuBgColorHint: document.querySelector("#skuBgColorHint"),
   kspInput: document.querySelector("#kspInput"),
   kspCount: document.querySelector("#kspCount"),
   kspColorInput: document.querySelector("#kspColorInput"),
@@ -298,6 +314,10 @@ let skuDrag = null;
 let activeRow = null;
 let backgroundRemovalModulePromise = null;
 let bgRemovalRunning = false;
+// Non-null only while the Touch Up modal is open. Holds the editing canvas,
+// the untouched baseline image the Restore brush copies from, and the
+// current tool/brush settings for the in-progress session.
+let editSkuState = null;
 
 function editingContext() {
   return activeRow || state;
@@ -631,6 +651,256 @@ async function removeBackgroundFromSku() {
     button.disabled = !editingContext().skuImageUrl;
     button.textContent = originalLabel;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Touch Up: manual erase/restore brush editor for the SKU image.
+//
+// Both AI background removal and plain photos can leave unwanted bits behind
+// (or, on the flip side, eat into the product itself). This gives a manual
+// brush-based fix: Erase clears pixels to transparent, Restore paints pixels
+// back from an untouched baseline snapshot taken when the editor opened.
+// Edits happen on the one shared, full-resolution SKU image — since every
+// output preview draws its own crop/zoom from that same source, a save here
+// updates every output at once, exactly like Remove Background does.
+// ---------------------------------------------------------------------------
+
+async function openEditSkuModal() {
+  const context = editingContext();
+  if (!context.skuImageUrl) {
+    setStatus("Add a SKU image first");
+    window.setTimeout(() => setStatus("Ready"), 1800);
+    return;
+  }
+
+  const image = await loadImage(context.skuImageUrl);
+  if (!image) {
+    setStatus("Could not open image for editing");
+    window.setTimeout(() => setStatus("Ready"), 1800);
+    return;
+  }
+
+  const canvas = els.editSkuCanvas;
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  editSkuState = {
+    context,
+    baselineImage: image,
+    canvas,
+    ctx,
+    tool: "erase",
+    brushSize: Number(els.editSkuBrushSize?.value) || 40,
+    drawing: false,
+    lastPoint: null,
+  };
+
+  setEditSkuTool("erase");
+  if (els.editSkuOverlay) els.editSkuOverlay.hidden = false;
+}
+
+function closeEditSkuModal() {
+  // Release any in-progress stroke's pointer capture explicitly (e.g. when
+  // Escape closes the modal mid-drag) rather than relying on it to lapse on
+  // its own once the canvas is hidden.
+  if (editSkuState?.drawing && editSkuState.pointerId != null) {
+    try {
+      editSkuState.canvas.releasePointerCapture(editSkuState.pointerId);
+    } catch {
+      // Already released or invalid — nothing to clean up.
+    }
+  }
+  if (els.editSkuOverlay) els.editSkuOverlay.hidden = true;
+  hideEditSkuBrushCursor();
+  editSkuState = null;
+}
+
+function setEditSkuTool(tool) {
+  if (editSkuState) editSkuState.tool = tool;
+  els.editSkuEraseButton?.classList.toggle("is-active", tool === "erase");
+  els.editSkuRestoreButton?.classList.toggle("is-active", tool === "restore");
+}
+
+function editSkuPointFromEvent(event) {
+  const canvas = editSkuState.canvas;
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((event.clientX - rect.left) * canvas.width) / rect.width,
+    y: ((event.clientY - rect.top) * canvas.height) / rect.height,
+  };
+}
+
+// The canvas hides its native cursor (styles.css sets `cursor: none`) so
+// this ring — sized and positioned from the real pointer event — can stand
+// in for it, making the actual brush footprint visible before you click.
+function updateEditSkuBrushCursor(event) {
+  if (!editSkuState || !els.editSkuBrushCursor) return;
+  const canvas = editSkuState.canvas;
+  const canvasRect = canvas.getBoundingClientRect();
+  const wrapRect = canvas.parentElement.getBoundingClientRect();
+  const scale = canvasRect.width / canvas.width; // CSS px per canvas px
+  const diameter = editSkuState.brushSize * scale;
+
+  els.editSkuBrushCursor.style.width = `${diameter}px`;
+  els.editSkuBrushCursor.style.height = `${diameter}px`;
+  els.editSkuBrushCursor.style.left = `${event.clientX - wrapRect.left}px`;
+  els.editSkuBrushCursor.style.top = `${event.clientY - wrapRect.top}px`;
+  els.editSkuBrushCursor.style.display = "block";
+}
+
+function hideEditSkuBrushCursor() {
+  if (els.editSkuBrushCursor) els.editSkuBrushCursor.style.display = "none";
+}
+
+// Fraction of the brush radius that stays fully solid before fading out to
+// the edge — gives both brushes a soft edge instead of a hard circular cutout.
+const BRUSH_FEATHER_START = 0.55;
+
+function createBrushGradient(ctx, x, y, radius) {
+  const gradient = ctx.createRadialGradient(x, y, radius * BRUSH_FEATHER_START, x, y, radius);
+  gradient.addColorStop(0, "rgba(0, 0, 0, 1)");
+  gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+  return gradient;
+}
+
+// Stamps one brush dab at `point`.
+//
+// Erase: fills the brush circle with a soft radial gradient using
+// "destination-out", so opacity is fully subtracted at the center and fades
+// out toward the edge.
+//
+// Restore: builds a small offscreen patch containing the baseline image
+// masked by that same gradient, then blends the patch onto the canvas. This
+// replaces an earlier version that relied on `globalCompositeOperation:
+// "copy"` inside a clipped region — that combination didn't reliably put
+// pixels back in every browser. Compositing a small patch with plain
+// "source-over" (the canvas default) instead works everywhere and gives
+// Restore the same feathered edge as Erase.
+function editSkuBrushStamp(point) {
+  const { ctx, tool, baselineImage, canvas, brushSize } = editSkuState;
+  const radius = brushSize / 2;
+
+  if (tool === "erase") {
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = createBrushGradient(ctx, point.x, point.y, radius);
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  // Reused across every restore stamp in this session (a fast drag can fire
+  // many stamps per second) instead of allocating a new canvas each time.
+  const size = Math.ceil(radius * 2);
+  let patch = editSkuState.patchCanvas;
+  if (!patch) {
+    patch = document.createElement("canvas");
+    editSkuState.patchCanvas = patch;
+  }
+  if (patch.width !== size || patch.height !== size) {
+    patch.width = size;
+    patch.height = size;
+  }
+  const patchCtx = patch.getContext("2d");
+  // Reset from whatever the previous stamp left behind before reusing it.
+  patchCtx.globalCompositeOperation = "source-over";
+  patchCtx.clearRect(0, 0, size, size);
+
+  patchCtx.fillStyle = createBrushGradient(patchCtx, radius, radius, radius);
+  patchCtx.beginPath();
+  patchCtx.arc(radius, radius, radius, 0, Math.PI * 2);
+  patchCtx.fill();
+
+  // Swap the gradient's flat color for the baseline image while keeping its
+  // faded alpha shape ("source-in" keeps only what's already covered by the
+  // gradient). Drawing the whole baseline image offset like this is safe —
+  // canvases silently clip anything outside their own small bounds, so
+  // there's no need to clamp the source rectangle by hand.
+  patchCtx.globalCompositeOperation = "source-in";
+  patchCtx.drawImage(
+    baselineImage,
+    -(point.x - radius),
+    -(point.y - radius),
+    canvas.width,
+    canvas.height,
+  );
+
+  ctx.drawImage(patch, point.x - radius, point.y - radius);
+}
+
+// Interpolates dabs between the last point and this one so fast strokes
+// don't leave gaps between individual brush stamps. Denser than a hard
+// brush would need, since overlapping feathered stamps show visible seams
+// more easily if spaced too far apart.
+function editSkuStrokeTo(point) {
+  const last = editSkuState.lastPoint || point;
+  const distance = Math.hypot(point.x - last.x, point.y - last.y);
+  const step = Math.max(editSkuState.brushSize / 6, 2);
+  const steps = Math.max(1, Math.ceil(distance / step));
+
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    editSkuBrushStamp({
+      x: last.x + (point.x - last.x) * t,
+      y: last.y + (point.y - last.y) * t,
+    });
+  }
+
+  editSkuState.lastPoint = point;
+}
+
+function resetEditSkuCanvas() {
+  const { ctx, baselineImage, canvas } = editSkuState;
+  ctx.save();
+  ctx.globalCompositeOperation = "copy";
+  ctx.drawImage(baselineImage, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+async function saveEditSkuCanvas() {
+  if (!editSkuState) return;
+  const { canvas, context } = editSkuState;
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) {
+    closeEditSkuModal();
+    return;
+  }
+
+  const newUrl = URL.createObjectURL(blob);
+  const previousUrl = context.skuImageUrl;
+
+  context.skuImageUrl = newUrl;
+  context.skuImageLabel = context.skuImageLabel
+    ? `${context.skuImageLabel} (touched up)`
+    : "Touched up";
+
+  if (previousUrl?.startsWith("blob:")) {
+    imageCache.delete(previousUrl);
+    URL.revokeObjectURL(previousUrl);
+  }
+
+  // Same "only touch what's on screen if it's still this context" guard used
+  // by Remove Background — harmless here since the modal blocks all other
+  // interaction, but keeps the two code paths consistent and safe if that
+  // ever changes.
+  if (editingContext() === context) {
+    els.skuFileName.textContent = context.skuImageLabel;
+    await renderPreviews();
+  }
+
+  closeEditSkuModal();
+}
+
+function endEditSkuStroke(event) {
+  if (!editSkuState || (event?.pointerId && editSkuState.pointerId !== event.pointerId)) return;
+  editSkuState.drawing = false;
+  editSkuState.lastPoint = null;
 }
 
 async function loadSkuImageFromInput() {
@@ -1014,7 +1284,7 @@ function getLayout(format, context = state) {
 
 function drawBackground(ctx, format, context = state) {
   const layout = getLayout(format, context);
-  ctx.fillStyle = "#FFF3F6";
+  ctx.fillStyle = context.skuBackgroundColor || "#FFF3F6";
   ctx.fillRect(0, 0, format.width, format.height);
   // 8.8 Paying Seller's KV area is a fixed campaign image baked into the
   // overlay (drawn later, fully opaque there), not a flat color — so there's
@@ -1088,11 +1358,10 @@ function getSkuBackgroundLabel(context = state) {
 
 // Selection cycles through "None" plus every background, wrapping in both
 // directions: -1 (None), 0, 1, ... N-1, back to -1.
-function cycleSkuBackground(direction, context = state) {
-  const total = SKU_BACKGROUNDS.length + 1;
-  const currentSlot = context.skuBackgroundIndex + 1;
-  const nextSlot = (currentSlot + direction + total) % total;
-  context.skuBackgroundIndex = nextSlot - 1;
+// index is -1 for "None", or 0..N-1 into SKU_BACKGROUNDS. Picked directly
+// from a thumbnail click rather than stepping through with arrows.
+function chooseSkuBackground(index, context = state) {
+  context.skuBackgroundIndex = index;
   if (!hasSkuBackground(context)) resetActiveLayers(context);
 }
 
@@ -1619,6 +1888,17 @@ function setKspColor(hex) {
   renderPreviews();
 }
 
+function setSkuBackgroundColor(hex) {
+  const normalized = hex.startsWith("#") ? hex.toUpperCase() : `#${hex.toUpperCase()}`;
+  if (!isHex(normalized)) return;
+
+  editingContext().skuBackgroundColor = normalized;
+  if (els.skuBgColorInput) els.skuBgColorInput.value = normalized;
+  if (els.skuBgColorHex) els.skuBgColorHex.value = normalized;
+  if (els.skuBgColorDot) els.skuBgColorDot.style.background = normalized;
+  renderPreviews();
+}
+
 function renderSwatches() {
   const fragment = document.createDocumentFragment();
 
@@ -1758,8 +2038,11 @@ function syncKvColorAvailability(context) {
 // Disable "Remove Background" until this context has a SKU image loaded, and
 // keep it out of the way while a removal run is already in flight.
 function syncRemoveBgAvailability(context) {
-  if (!els.removeBgButton || bgRemovalRunning) return;
-  els.removeBgButton.disabled = !context.skuImageUrl;
+  const hasImage = Boolean(context.skuImageUrl);
+  if (els.removeBgButton && !bgRemovalRunning) els.removeBgButton.disabled = !hasImage;
+  // Touch Up has no async "running" state of its own (unlike Remove
+  // Background), so it's always safe to sync straight from context.
+  if (els.editSkuButton) els.editSkuButton.disabled = !hasImage;
 }
 
 function selectedOutputs() {
@@ -2434,6 +2717,7 @@ function createBulkRowsFromCsv(text) {
       saturation: state.saturation,
       value: state.value,
       skuBackgroundIndex: state.skuBackgroundIndex,
+      skuBackgroundColor: state.skuBackgroundColor,
       skuBackgroundPositions: {},
       skuBackgroundZooms: {},
       resolved: false,
@@ -2688,12 +2972,14 @@ async function generateBulk() {
 
       setBulkRowStatus(row, "Generating...", "pending");
 
-      const rowFolder = `row-${bulkState.rows.indexOf(row) + 1}`;
+      // All rows land in one flat ZIP folder — prefix the filename (instead
+      // of nesting a row-N/ subfolder) so files stay unique across rows.
+      const rowPrefix = `row-${bulkState.rows.indexOf(row) + 1}`;
       let rowFailed = false;
       for (const outputId of row.outputs) {
         try {
           const file = await createExportFile(outputId, row);
-          files.push({ ...file, name: `${rowFolder}/${file.name}` });
+          files.push({ ...file, name: `${rowPrefix}-${file.name}` });
         } catch (error) {
           console.error("Bulk export failed", row, outputId, error);
           rowFailed = true;
@@ -2765,31 +3051,152 @@ els.skuLink.addEventListener("keydown", (event) => {
 els.loadSkuLinkButton.addEventListener("click", loadSkuImageFromInput);
 els.removeBgButton?.addEventListener("click", removeBackgroundFromSku);
 
-function renderBackgroundPicker() {
-  const context = editingContext();
-  const hasBg = hasSkuBackground(context);
-  if (els.bgSwatch) {
-    els.bgSwatch.style.backgroundImage = hasBg ? `url("${getSkuBackgroundSrc(context)}")` : "";
-    els.bgSwatch.classList.toggle("is-empty", !hasBg);
+els.editSkuButton?.addEventListener("click", openEditSkuModal);
+els.editSkuCloseButton?.addEventListener("click", closeEditSkuModal);
+els.editSkuCancelButton?.addEventListener("click", closeEditSkuModal);
+els.editSkuSaveButton?.addEventListener("click", saveEditSkuCanvas);
+els.editSkuResetButton?.addEventListener("click", () => {
+  if (editSkuState) resetEditSkuCanvas();
+});
+els.editSkuEraseButton?.addEventListener("click", () => setEditSkuTool("erase"));
+els.editSkuRestoreButton?.addEventListener("click", () => setEditSkuTool("restore"));
+els.editSkuBrushSize?.addEventListener("input", (event) => {
+  if (!editSkuState) return;
+  editSkuState.brushSize = Number(event.target.value);
+  // Resize the cursor ring immediately even if the pointer hasn't moved —
+  // recompute from its current on-screen position rather than requiring a
+  // mousemove first.
+  if (els.editSkuBrushCursor && els.editSkuBrushCursor.style.display === "block") {
+    const canvas = editSkuState.canvas;
+    const scale = canvas.getBoundingClientRect().width / canvas.width;
+    const diameter = editSkuState.brushSize * scale;
+    els.editSkuBrushCursor.style.width = `${diameter}px`;
+    els.editSkuBrushCursor.style.height = `${diameter}px`;
   }
-  if (els.bgName) els.bgName.textContent = getSkuBackgroundLabel(context);
-  if (els.bgCount) {
-    els.bgCount.textContent = hasBg
-      ? `${context.skuBackgroundIndex + 1}/${SKU_BACKGROUNDS.length}`
-      : "";
-  }
-}
-
-els.bgPrevButton?.addEventListener("click", () => {
-  cycleSkuBackground(-1, editingContext());
-  renderBackgroundPicker();
-  renderPreviews();
 });
 
-els.bgNextButton?.addEventListener("click", () => {
-  cycleSkuBackground(1, editingContext());
-  renderBackgroundPicker();
-  renderPreviews();
+if (els.editSkuCanvas) {
+  els.editSkuCanvas.addEventListener("pointerdown", (event) => {
+    if (!editSkuState || event.button !== 0) return;
+    event.preventDefault();
+    els.editSkuCanvas.setPointerCapture(event.pointerId);
+    editSkuState.drawing = true;
+    editSkuState.pointerId = event.pointerId;
+    editSkuState.lastPoint = null;
+    editSkuStrokeTo(editSkuPointFromEvent(event));
+  });
+
+  els.editSkuCanvas.addEventListener("pointermove", (event) => {
+    updateEditSkuBrushCursor(event);
+    if (!editSkuState?.drawing || editSkuState.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    editSkuStrokeTo(editSkuPointFromEvent(event));
+  });
+
+  els.editSkuCanvas.addEventListener("pointerenter", updateEditSkuBrushCursor);
+  els.editSkuCanvas.addEventListener("pointerleave", hideEditSkuBrushCursor);
+
+  els.editSkuCanvas.addEventListener("pointerup", endEditSkuStroke);
+  els.editSkuCanvas.addEventListener("pointercancel", endEditSkuStroke);
+  els.editSkuCanvas.addEventListener("lostpointercapture", endEditSkuStroke);
+}
+
+// Escape closes the modal, same as clicking Cancel — no partial-close state
+// to worry about since nothing is written back until Save.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && editSkuState) closeEditSkuModal();
+});
+
+// Built once — each tile's click handler reads editingContext() fresh, so
+// the same grid works whether the single editor or a bulk row is active.
+// renderBackgroundPicker() (below) just toggles which tile looks selected.
+function renderBackgroundThumbGrid() {
+  if (!els.bgThumbGrid) return;
+  const fragment = document.createDocumentFragment();
+
+  const noneTile = document.createElement("button");
+  noneTile.type = "button";
+  noneTile.className = "bg-thumb is-none";
+  noneTile.dataset.bgIndex = "-1";
+  noneTile.setAttribute("role", "option");
+  noneTile.setAttribute("aria-label", "No background scene");
+  noneTile.innerHTML = `<span class="bg-thumb-label">None</span>`;
+  noneTile.addEventListener("click", () => {
+    chooseSkuBackground(-1, editingContext());
+    renderBackgroundPicker();
+    renderPreviews();
+  });
+  fragment.append(noneTile);
+
+  SKU_BACKGROUNDS.forEach((background, index) => {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "bg-thumb";
+    tile.dataset.bgIndex = String(index);
+    tile.style.backgroundImage = `url("${background.src}")`;
+    tile.setAttribute("role", "option");
+    tile.setAttribute("aria-label", background.label);
+    tile.innerHTML = `<span class="bg-thumb-label">${background.label}</span>`;
+    tile.addEventListener("click", () => {
+      chooseSkuBackground(index, editingContext());
+      renderBackgroundPicker();
+      renderPreviews();
+    });
+    fragment.append(tile);
+  });
+
+  els.bgThumbGrid.append(fragment);
+}
+
+function renderBackgroundPicker() {
+  const context = editingContext();
+  const currentIndex = context.skuBackgroundIndex;
+
+  els.bgThumbGrid?.querySelectorAll(".bg-thumb").forEach((tile) => {
+    const isSelected = Number(tile.dataset.bgIndex) === currentIndex;
+    tile.classList.toggle("is-selected", isSelected);
+    tile.setAttribute("aria-selected", String(isSelected));
+  });
+
+  syncSkuBackgroundColorAvailability(context);
+}
+
+// The flat color only shows through when no scene is selected — a scene
+// covers the whole product area, so editing the color would have no visible
+// effect while one is active. Greyed out (not hidden) so it's clear why.
+function syncSkuBackgroundColorAvailability(context) {
+  const disabled = hasSkuBackground(context);
+  const controls = els.skuBgColorRow?.querySelector(".inline-color-control");
+  controls?.classList.toggle("is-disabled", disabled);
+  // pointer-events:none (from .is-disabled) only blocks mouse clicks — a
+  // keyboard user could still Tab in and edit these while a scene is
+  // selected, so disable the actual inputs too (matches the KV color
+  // picker's pattern in syncKvColorAvailability).
+  [els.skuBgColorInput, els.skuBgColorHex].forEach((input) => {
+    if (input) input.disabled = disabled;
+  });
+
+  if (els.skuBgColorHint) {
+    els.skuBgColorHint.textContent = disabled
+      ? `Not used while "${getSkuBackgroundLabel(context)}" is selected — that scene covers the whole product area.`
+      : "Fills the product area behind a transparent SKU photo when no background scene is selected.";
+  }
+
+  const colorValue = context.skuBackgroundColor || "#FFF3F6";
+  if (els.skuBgColorInput) els.skuBgColorInput.value = colorValue;
+  if (els.skuBgColorHex) els.skuBgColorHex.value = colorValue.toUpperCase();
+  if (els.skuBgColorDot) els.skuBgColorDot.style.background = colorValue;
+}
+
+els.skuBgColorInput?.addEventListener("input", (event) => {
+  setSkuBackgroundColor(event.target.value);
+});
+
+els.skuBgColorHex?.addEventListener("input", (event) => {
+  const value = event.target.value.startsWith("#")
+    ? event.target.value
+    : `#${event.target.value}`;
+  if (isHex(value)) setSkuBackgroundColor(value);
 });
 
 els.kspInput.addEventListener("input", (event) => {
@@ -2973,6 +3380,7 @@ syncKspCount();
 drawColorCanvas();
 setKspColor(state.kspColor);
 setColor(state.kvColor);
+renderBackgroundThumbGrid();
 renderBackgroundPicker();
 renderBulkRows();
 initTheme();

@@ -618,6 +618,12 @@ input[type="file"] {
   gap: 10px;
 }
 
+.dual-action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .field-action-button {
   min-height: 46px;
   border: 0;
@@ -816,86 +822,70 @@ input[type="file"] {
   line-height: 1.4;
 }
 
-.bg-picker {
+.bg-thumb-grid {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  align-items: center;
 }
 
-.bg-arrow-button {
-  height: 46px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--field-bg);
-  color: var(--ink);
-  display: grid;
-  place-items: center;
-  padding: 0;
-  transition:
-    border-color 140ms ease,
-    color 140ms ease;
-}
-
-.bg-arrow-button svg {
-  width: 16px;
-  height: 16px;
-}
-
-.bg-arrow-button:hover {
-  border-color: var(--shopee);
-  color: var(--shopee);
-}
-
-.bg-picker-preview {
-  min-height: 46px;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-soft);
-  padding: 0 10px;
-}
-
-.bg-swatch {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
+.bg-thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background-color: var(--surface-soft);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-.bg-swatch.is-empty {
+.bg-thumb:hover {
+  border-color: var(--shopee-dark);
+}
+
+.bg-thumb.is-selected {
+  border-color: var(--shopee);
+  box-shadow: 0 0 0 3px rgba(238, 77, 45, 0.28);
+}
+
+.bg-thumb-label {
+  width: 100%;
+  font-size: 9.5px;
+  font-weight: 750;
+  line-height: 1.25;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.68), transparent);
+  padding: 12px 4px 4px;
+  text-align: center;
+}
+
+.bg-thumb.is-none {
   border-style: dashed;
   border-color: var(--upload-border);
-  background-image: none !important;
+  align-items: center;
+  justify-content: center;
 }
 
-.bg-picker-meta {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.bg-picker-meta span:first-child {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 750;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.bg-count {
+.bg-thumb.is-none .bg-thumb-label {
+  position: static;
+  background: none;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
+  padding: 0;
+}
+
+.bg-thumb.is-none.is-selected {
+  border-style: solid;
+}
+
+.inline-color-control.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .layer-switch {
@@ -1250,5 +1240,177 @@ input[type="file"] {
   .download-button,
   #downloadAllButton {
     width: 100%;
+  }
+}
+
+.edit-sku-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.edit-sku-overlay[hidden] {
+  display: none;
+}
+
+.edit-sku-panel {
+  width: 100%;
+  max-width: min(720px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px var(--panel-shadow);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.edit-sku-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.edit-sku-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.edit-sku-header button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.edit-sku-header button:hover {
+  color: var(--ink);
+}
+
+.edit-sku-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.edit-sku-tool-group {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.edit-sku-tool-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.edit-sku-tool-btn.is-active {
+  background: var(--shopee);
+  color: #fff;
+}
+
+.edit-sku-brush-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.edit-sku-brush-size input {
+  width: 120px;
+}
+
+.edit-sku-reset-button {
+  min-height: 38px;
+  padding: 0 16px;
+  margin-left: auto;
+}
+
+.edit-sku-canvas-wrap {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  background-color: var(--surface-soft);
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.18) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.18) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.18) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.18) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+#editSkuCanvas {
+  max-width: 100%;
+  max-height: 60vh;
+  display: block;
+  cursor: none;
+}
+
+.edit-sku-brush-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65);
+  background: rgba(255, 255, 255, 0.08);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  display: none;
+}
+
+.edit-sku-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.edit-sku-cancel-button {
+  background: var(--field-bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.edit-sku-cancel-button:hover {
+  background: var(--surface-soft);
+}
+
+@media (max-width: 640px) {
+  .edit-sku-panel {
+    padding: 14px;
+  }
+
+  .edit-sku-reset-button {
+    margin-left: 0;
   }
 }

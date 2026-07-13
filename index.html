@@ -150,37 +150,45 @@
 
           <div class="form-row">
             <label>Remove Background</label>
-            <button type="button" class="field-action-button" id="removeBgButton">
-              Remove Background
-            </button>
+            <div class="dual-action-row span-wide">
+              <button type="button" class="field-action-button" id="removeBgButton">
+                Remove Background
+              </button>
+              <button type="button" class="field-action-button" id="editSkuButton">
+                Touch Up
+              </button>
+            </div>
             <p class="field-hint">
-              Runs locally in your browser — the image is never uploaded anywhere. First use downloads a one-time ~80MB model (cached after that); repeat uses are fast.
+              Remove Background runs locally in your browser — the image is never uploaded anywhere. First use downloads a one-time ~80MB model (cached after that); repeat uses are fast. Touch Up lets you erase leftover bits or restore over-erased areas by hand.
             </p>
             <p class="field-hint is-error" id="removeBgError" hidden></p>
           </div>
 
           <div class="form-row">
             <label>SKU Background</label>
-            <div class="bg-picker span-wide">
-              <button type="button" id="bgPrevButton" class="bg-arrow-button" aria-label="Previous SKU background">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
-              <div class="bg-picker-preview">
-                <div class="bg-swatch is-empty" id="bgSwatch" aria-hidden="true"></div>
-                <div class="bg-picker-meta">
-                  <span id="bgName">None</span>
-                  <span class="bg-count" id="bgCount"></span>
-                </div>
-              </div>
-              <button type="button" id="bgNextButton" class="bg-arrow-button" aria-label="Next SKU background">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M9 6l6 6-6 6" />
-                </svg>
-              </button>
+            <div
+              class="bg-thumb-grid span-wide"
+              id="bgThumbGrid"
+              role="listbox"
+              aria-label="SKU background scenes"
+            ></div>
+            <p class="field-hint">Only shows through transparent SKU photos. Pick “None” to use a flat color instead.</p>
+          </div>
+
+          <div class="form-row" id="skuBgColorRow">
+            <label for="skuBgColorInput">Background Color</label>
+            <div class="inline-color-control span-wide">
+              <label class="native-color compact-color" for="skuBgColorInput">
+                <span class="color-dot" id="skuBgColorDot"></span>
+                <input id="skuBgColorInput" type="color" value="#FFF3F6" />
+                <span>Pick</span>
+              </label>
+              <label class="hex-field" for="skuBgColorHex">
+                <span>Hex</span>
+                <input id="skuBgColorHex" type="text" value="#FFF3F6" maxlength="7" />
+              </label>
             </div>
-            <p class="field-hint">Only shows through transparent SKU photos. Optional — leave on “None” to ignore.</p>
+            <p class="field-hint" id="skuBgColorHint">Fills the product area behind a transparent SKU photo when no background scene is selected.</p>
           </div>
 
           <div class="form-row">
@@ -299,6 +307,45 @@
         <div class="preview-list" id="previewList"></div>
       </section>
     </main>
+
+    <div class="edit-sku-overlay" id="editSkuOverlay" hidden>
+      <div class="edit-sku-panel" role="dialog" aria-modal="true" aria-label="Touch up SKU image">
+        <div class="edit-sku-header">
+          <h2>Touch Up SKU Image</h2>
+          <button type="button" id="editSkuCloseButton" aria-label="Close">&times;</button>
+        </div>
+        <div class="edit-sku-toolbar">
+          <div class="edit-sku-tool-group" role="group" aria-label="Brush tool">
+            <button type="button" class="edit-sku-tool-btn is-active" id="editSkuEraseButton" data-tool="erase">
+              Erase
+            </button>
+            <button type="button" class="edit-sku-tool-btn" id="editSkuRestoreButton" data-tool="restore">
+              Restore
+            </button>
+          </div>
+          <label class="edit-sku-brush-size">
+            <span>Brush size</span>
+            <input type="range" id="editSkuBrushSize" min="8" max="240" value="40" />
+          </label>
+          <button type="button" class="field-action-button edit-sku-reset-button" id="editSkuResetButton">
+            Reset
+          </button>
+        </div>
+        <div class="edit-sku-canvas-wrap">
+          <canvas id="editSkuCanvas"></canvas>
+          <div class="edit-sku-brush-cursor" id="editSkuBrushCursor" aria-hidden="true"></div>
+        </div>
+        <p class="field-hint">
+          Erase leftover background bits, or switch to Restore to bring pixels back if you erase too far into the product. Nothing is applied until you click Save.
+        </p>
+        <div class="edit-sku-footer">
+          <button type="button" class="field-action-button edit-sku-cancel-button" id="editSkuCancelButton">
+            Cancel
+          </button>
+          <button type="button" class="generate-button" id="editSkuSaveButton">Save</button>
+        </div>
+      </div>
+    </div>
 
     <script src="script.js"></script>
   </body>
