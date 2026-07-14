@@ -48,6 +48,7 @@ Opening `index.html` directly from the file system may block canvas image export
 ## Notes
 
 - All asset paths are relative.
+- The default `KV Color` is Shopee orange (`#EE4D2D`); change it anytime with the color picker, hex field, or swatches.
 - Template options are `Mall BAU`, `Mall BAU New Arrival`, and `8.8 Paying Seller`.
 - `8.8 Paying Seller` only has artwork for Category Banner and Banner Card — the other three output buttons are disabled while it's selected (and auto-deselected if they were already picked). Its background is a fixed campaign image rather than a flat color, so the `KV Color` picker is disabled and has no effect on this template. Brand Logo, SKU Image, and KSP editing work exactly the same as the other templates.
 - Turn on `Hide white logo container` to use the no-container Template 2 overlays.
@@ -60,7 +61,10 @@ Opening `index.html` directly from the file system may block canvas image export
 - Pick a `SKU Background` scene from the thumbnail grid (or `None`). The chosen background applies to every output format, but its position/zoom is adjusted per format since box sizes differ.
 - The background only shows through a transparent-background SKU photo (e.g. a background-removed PNG). A fully opaque SKU photo (e.g. a plain JPG) will simply cover it, so the background feature is optional either way.
 - When `SKU Background` is set to `None`, the `Background Color` picker (hex or color swatch) controls the flat fill behind the product area instead. It's only active while `None` is selected — pick a scene and this color has no effect, since the scene covers that area completely.
-- When a background scene is selected, each preview card shows a small `SKU | BG` switch. It picks which layer the canvas drag and the zoom slider control.
+- Each preview card has a `Logo / KSP / SKU / BG` switch (the `BG` option only appears once a background scene is selected) that picks what the slider below it controls, per output format:
+  - `Logo`: zoom only, no drag — the brand logo always stays centered in its box; zooming in crops closer, zooming out shrinks it, same rounded-rect box either way.
+  - `KSP`: a font-size slider instead of a zoom percentage. By default the KSP text auto-shrinks to fit its box; dragging this slider takes manual control of the exact size for that output, which is the way to force where the text wraps — for example, making sure two distinct phrases land on two separate lines instead of auto-fit choosing a different break point. Range is that output format's own designed min/max size.
+  - `SKU` / `BG`: unchanged — drag to reposition, slider to zoom.
 - The KSP input is limited to 50 characters.
 - KSP text color can be changed with the color picker or hex field.
 - The output formats are Category Banner, Top Module Banner, IG Story, FB Post, and Banner Card.
@@ -76,7 +80,7 @@ The `Bulk generate from CSV` panel above the main editor batch-creates assets fo
 - Click `Download template` for a starter CSV. Columns are `KSP`, `Brand Logo`, `SKU Image`. Brand Logo and SKU Image accept either a Shopee image hash or a direct image link, same as the `Image Hash / Image Link` field in the single editor.
 - After uploading, each row defaults to whatever is selected under `Default outputs for new rows` (Category Banner and Banner Card, out of the box, to keep batch runs fast). Every row's output selection can be overridden individually with its own chips.
 - Click `Preview & edit` on a row to load that row into the main editor — the exact same sidebar (Template, Brand Logo, Logo Color, SKU Image, SKU Background, KSP, KV Color, output selection) and preview stage used for a single brand, not a separate simplified view. Fetching the row's logo/SKU happens once and is cached, so reopening a row is instant. A banner above the preview stage shows which row you're editing, with a `Back to main editor` button to return to the single-brand editor. Only one row can be open at a time; opening another row closes the previous one.
-- Every row is fully independent: Template, KV Color, KSP Text Color, the Logo Color / Hide-container toggles, SKU Background, Brand Logo, SKU Image, KSP text, output selection, and each output's drag position/zoom can all differ per row. New rows start as a copy of whatever the sidebar currently has, then become that row's own settings once you preview/edit it — so ten different brands can have ten different KV colors, text colors, templates, or backgrounds, and each result reflects that row's own configuration.
+- Every row is fully independent: Template, KV Color, KSP Text Color, the Logo Color / Hide-container toggles, SKU Background, Brand Logo, SKU Image, KSP text, output selection, and each output's drag position/zoom/logo-zoom/KSP-font-size can all differ per row. New rows start as a copy of whatever the sidebar currently has, then become that row's own settings once you preview/edit it — so ten different brands can have ten different KV colors, text colors, templates, or backgrounds, and each result reflects that row's own configuration.
 - `Remove Background` and `Touch Up` both work the same way while previewing a row — they only affect that row's SKU image.
 - If a row's template is `8.8 Paying Seller`, that row's output chips are limited to Category Banner and Banner Card (the other three are disabled), same as the single editor.
 - `Generate all` uses each row's own settings and keeps any edits made while previewing it. Rows that were never opened export with their default centered framing and whatever settings they started with.

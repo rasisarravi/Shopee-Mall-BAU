@@ -41,6 +41,15 @@ const EXTERNAL_SHOPEE_LOGO_OUTPUTS = new Set(["ig-story", "fb-post"]);
 const SKU_ZOOM_MIN = 0.1;
 const SKU_ZOOM_MAX = 2.5;
 const SKU_ZOOM_DEFAULT = 1;
+const LOGO_ZOOM_MIN = 0.5;
+const LOGO_ZOOM_MAX = 2.5;
+const LOGO_ZOOM_DEFAULT = 1;
+// Absolute last-resort floor auto-fit will shrink to before giving up (not
+// the same as a format's own layout.ksp.minSize, which is a curated "design
+// intent" range used only for the manual override slider). Shared by
+// drawFittedText's default path and the slider's initial-value estimate so
+// the two can't silently drift apart.
+const KSP_AUTOFIT_MIN_SIZE = 10;
 const KSP_MAX_CHARACTERS = 50;
 const SKU_BACKGROUND_BASE = "assets/sku-backgrounds/";
 const SKU_BACKGROUNDS = [
@@ -207,10 +216,20 @@ const state = {
   skuLink: "",
   ksp: "EXCLUSIVE LAUNCH DISKON 25%",
   kspColor: "#FFFFFF",
-  kvColor: "#315F55",
+  kvColor: "#EE4D2D",
   outputs: new Set(Object.keys(outputMeta)),
   skuPositions: {},
   skuZooms: {},
+  // Brand logo has no drag/position — only a per-output zoom multiplier,
+  // cropped by its rounded-rect box (like SKU zoom, just no repositioning).
+  logoZooms: {},
+  // Per-output manual font size override for the KSP text. Unset (no key
+  // for that output) means "keep auto-fit" — the existing behavior of
+  // shrinking from maxSize until the text fits its box. Once set, it skips
+  // auto-fit entirely, letting the user force a specific size so wrapping
+  // lands exactly where they want (e.g. two phrases landing on two lines
+  // instead of the auto-fit algorithm choosing a different break point).
+  kspFontSizes: {},
   skuBackgroundIndex: -1, // -1 = "None"; 0..N-1 indexes into SKU_BACKGROUNDS
   skuBackgroundPositions: {},
   skuBackgroundZooms: {},
@@ -223,9 +242,9 @@ const state = {
   // editor's `state`, or a bulk row acting as its own context) carries its
   // own copy of this so they never interfere with each other.
   activeLayerByOutput: {},
-  hue: 166,
-  saturation: 0.48,
-  value: 0.37,
+  hue: 10,
+  saturation: 0.81,
+  value: 0.93,
 };
 
 const els = {
@@ -303,6 +322,11 @@ const swatches = [
 const imageCache = new Map();
 const imageContentBounds = new WeakMap();
 const zipEncoder = new TextEncoder();
+// Off-DOM canvas used only to measure text — lets the KSP font-size slider
+// start at whatever size auto-fit would currently render, instead of a
+// hardcoded guess, without needing a real preview canvas to already exist.
+const measureCanvas = document.createElement("canvas");
+const measureCtx = measureCanvas.getContext("2d");
 let fontReady;
 let renderVersion = 0;
 let skuDrag = null;
@@ -1129,27 +1153,48 @@ function wrapText(ctx, text, maxWidth) {
   return lines;
 }
 
+// Shrinks from maxSize down to minSize (in steps of 2) until the wrapped
+// text fits within boxHeight. Shared by drawFittedText's default auto-fit
+// path and by the KSP slider's initial value (so the slider starts at
+// whatever size is actually currently on screen, not a hardcoded guess).
+function computeFittedTextSize(ctx, text, boxWidth, boxHeight, maxSize, minSize, lineHeight) {
+  let size = maxSize;
+  let lines = [];
+
+  while (size >= minSize) {
+    ctx.font = `900 ${size}px ${FONT_NAME}, Arial Black, sans-serif`;
+    lines = wrapText(ctx, text, boxWidth);
+    if (lines.length * size * lineHeight <= boxHeight) break;
+    size -= 2;
+  }
+
+  return { size: Math.max(size, minSize), lines };
+}
+
 function drawFittedText(ctx, text, box, options = {}) {
   const {
     color = "#FFFFFF",
     align = "center",
     baseline = "middle",
     maxSize = 58.67,
-    minSize = 10,
+    minSize = KSP_AUTOFIT_MIN_SIZE,
     lineHeight = 1.04,
+    // When set (a manual per-output override), skips auto-fit entirely and
+    // draws at exactly this size — lets the user force where lines break
+    // instead of the auto-fit algorithm picking a size for them.
+    fixedSize = null,
   } = options;
 
-  let size = maxSize;
-  let lines = [];
+  let size;
+  let lines;
 
-  while (size >= minSize) {
+  if (fixedSize) {
+    size = fixedSize;
     ctx.font = `900 ${size}px ${FONT_NAME}, Arial Black, sans-serif`;
     lines = wrapText(ctx, text, box.width);
-    if (lines.length * size * lineHeight <= box.height) break;
-    size -= 2;
+  } else {
+    ({ size, lines } = computeFittedTextSize(ctx, text, box.width, box.height, maxSize, minSize, lineHeight));
   }
-
-  size = Math.max(size, minSize);
 
   ctx.fillStyle = color;
   ctx.textAlign = align;
@@ -1176,7 +1221,7 @@ function drawFallbackBrand(ctx, box) {
   ctx.fillText("cottonseeds", box.x + box.width / 2, box.y + box.height / 2);
 }
 
-function drawBrandLogo(ctx, image, box, context = state) {
+function drawBrandLogo(ctx, image, box, context = state, outputId = null) {
   ctx.save();
   roundRect(ctx, box.x, box.y, box.width, box.height, box.radius);
   ctx.clip();
@@ -1184,13 +1229,22 @@ function drawBrandLogo(ctx, image, box, context = state) {
   if (image) {
     const insetX = box.width * 0.06;
     const insetY = box.height * 0.1;
+    const innerWidth = box.width - insetX * 2;
+    const innerHeight = box.height - insetY * 2;
+    // Zoom scales the contain-fit target box around its own center, then
+    // the rounded-rect clip above crops anything beyond the visible box —
+    // same "zoom in and crop" idea as SKU zoom, but with no drag/reposition,
+    // since the logo always stays centered in its box.
+    const zoom = outputId ? getLogoZoom(outputId, context) : LOGO_ZOOM_DEFAULT;
+    const zoomedWidth = innerWidth * zoom;
+    const zoomedHeight = innerHeight * zoom;
     drawContainTrimmed(
       ctx,
       image,
-      box.x + insetX,
-      box.y + insetY,
-      box.width - insetX * 2,
-      box.height - insetY * 2,
+      box.x + insetX - (zoomedWidth - innerWidth) / 2,
+      box.y + insetY - (zoomedHeight - innerHeight) / 2,
+      zoomedWidth,
+      zoomedHeight,
     );
   } else if (!context.hideLogoContainer) {
     drawFallbackBrand(ctx, box);
@@ -1262,9 +1316,14 @@ function getLayout(format, context = state) {
       logo:
         newArrivalLogo ||
         { x: 119.976, y: 196.548, width: 342.137, height: 144.934, radius: 23.803 },
+      // Width widened from the original 344 (which left ~145px unused on
+      // the right of the 607-wide KV column, forcing longer KSP text into
+      // extra wrapped lines). x shifted left from 120 to 61 so the wider
+      // box stays centered on the same horizontal center as the logo box
+      // above it (~291px) instead of just growing rightward off-center.
       ksp:
         newArrivalKsp ||
-        { x: 120, y: 394, width: 344, height: 150, maxSize: 58.67, minSize: 36 },
+        { x: 61, y: 394, width: 460, height: 150, maxSize: 58.67, minSize: 36 },
       productAlign: [0.56, 0.55],
     };
   }
@@ -1344,6 +1403,25 @@ function setSkuZoom(outputId, zoom, context = state) {
   context.skuZooms[outputId] = clamp(zoom, SKU_ZOOM_MIN, SKU_ZOOM_MAX);
 }
 
+function getLogoZoom(outputId, context = state) {
+  return context.logoZooms[outputId] || LOGO_ZOOM_DEFAULT;
+}
+
+function setLogoZoom(outputId, zoom, context = state) {
+  context.logoZooms[outputId] = clamp(zoom, LOGO_ZOOM_MIN, LOGO_ZOOM_MAX);
+}
+
+// Returns the manually-set KSP font size for this output, or null when it
+// should keep using auto-fit (the default until the user touches the slider).
+function getKspFontSize(outputId, context = state) {
+  const saved = context.kspFontSizes[outputId];
+  return Number.isFinite(saved) ? saved : null;
+}
+
+function setKspFontSize(outputId, size, layout, context = state) {
+  context.kspFontSizes[outputId] = clamp(size, layout.ksp.minSize, layout.ksp.maxSize);
+}
+
 function hasSkuBackground(context = state) {
   return context.skuBackgroundIndex >= 0 && context.skuBackgroundIndex < SKU_BACKGROUNDS.length;
 }
@@ -1409,20 +1487,44 @@ function getSkuLayers(context = state) {
       getZoom: (outputId) => getSkuBackgroundZoom(outputId, context),
       setZoom: (outputId, zoom) => setSkuBackgroundZoom(outputId, zoom, context),
     },
+    // No drag — the logo always stays centered in its box, so getPosition/
+    // setPosition/getImageUrl are unused stubs (bindSkuDrag never reaches
+    // them for this layer; kept only so nothing crashes if something else
+    // ever calls through this interface generically).
+    logo: {
+      getImageUrl: () => context.brandLogoUrl,
+      getPosition: () => ({ x: 0, y: 0 }),
+      setPosition: () => {},
+      getZoom: (outputId) => getLogoZoom(outputId, context),
+      setZoom: (outputId, zoom) => setLogoZoom(outputId, zoom, context),
+    },
   };
 }
 
+// "ksp" is a valid active-layer key too, but isn't a draggable image layer —
+// it's handled as a special case wherever the zoom control is built, so it
+// deliberately has no entry in getSkuLayers().
+const VALID_LAYER_KEYS = new Set(["logo", "ksp", "sku", "background"]);
+
 function getActiveLayer(outputId, context = state) {
-  return context.activeLayerByOutput[outputId] === "background" ? "background" : "sku";
+  const stored = context.activeLayerByOutput[outputId];
+  return VALID_LAYER_KEYS.has(stored) ? stored : "sku";
 }
 
 function setActiveLayer(outputId, layerKey, context = state) {
-  context.activeLayerByOutput[outputId] = layerKey === "background" ? "background" : "sku";
+  context.activeLayerByOutput[outputId] = VALID_LAYER_KEYS.has(layerKey) ? layerKey : "sku";
 }
 
+// Called when a background scene is deselected, since "background" stops
+// being a valid choice for any card currently on it. Only touches outputs
+// actually on "background" — a deliberate Logo or KSP selection has nothing
+// to do with the background scene and shouldn't get bumped back to SKU
+// just because the background was turned off.
 function resetActiveLayers(context = state) {
   Object.keys(context.activeLayerByOutput).forEach((outputId) => {
-    context.activeLayerByOutput[outputId] = "sku";
+    if (context.activeLayerByOutput[outputId] === "background") {
+      context.activeLayerByOutput[outputId] = "sku";
+    }
   });
 }
 
@@ -1559,11 +1661,12 @@ async function drawOutput(outputId, canvas, options = {}) {
       naLogoBox.height,
     );
   }
-  drawBrandLogo(ctx, brandLogo, layout.logo, context);
+  drawBrandLogo(ctx, brandLogo, layout.logo, context, outputId);
   drawFittedText(ctx, context.ksp, layout.ksp, {
     color: context.kspColor,
     maxSize: layout.ksp.maxSize,
-    minSize: 10,
+    minSize: KSP_AUTOFIT_MIN_SIZE,
+    fixedSize: getKspFontSize(outputId, context),
   });
 }
 
@@ -1623,6 +1726,10 @@ function bindSkuDrag(canvas, outputId, context = state) {
     if (!pointInsideBox(point, layout.product)) return;
 
     const layerKey = getActiveLayer(outputId, context);
+    // Logo and KSP have no drag/reposition — only their zoom/size slider —
+    // so clicking the product area while either is the active layer does
+    // nothing rather than trying to drag a layer that isn't draggable.
+    if (layerKey !== "sku" && layerKey !== "background") return;
     const image = await loadImage(getSkuLayers(context)[layerKey].getImageUrl());
     if (!image) return;
 
@@ -1661,6 +1768,7 @@ function bindSkuDrag(canvas, outputId, context = state) {
 
 function createPreviewBlock(outputId, context = state, onRerender = renderPreviews) {
   const format = outputMeta[outputId];
+  const layout = getLayout(format, context);
   const block = document.createElement("section");
   block.className = "preview-block";
   let canvas;
@@ -1682,62 +1790,108 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
   actions.className = "preview-actions";
 
   const activeLayerKey = getActiveLayer(outputId, context);
-  const activeLayer = getSkuLayers(context)[activeLayerKey];
   const isBackgroundActive = activeLayerKey === "background";
+  const isLogoActive = activeLayerKey === "logo";
+  const isKspActive = activeLayerKey === "ksp";
+  const isDraggableLayer = activeLayerKey === "sku" || isBackgroundActive;
+  // Logo/SKU/BG all have a getZoom/setZoom pair via getSkuLayers(); KSP is
+  // handled as its own special case below (its "zoom" is really a font
+  // size, with different units/range), so it deliberately has no entry there.
+  const activeLayer = isKspActive ? null : getSkuLayers(context)[activeLayerKey];
 
-  if (hasSkuBackground(context)) {
-    const layerSwitch = document.createElement("div");
-    layerSwitch.className = "layer-switch";
-    layerSwitch.setAttribute("role", "group");
-    layerSwitch.setAttribute("aria-label", `${format.title} move target`);
+  // Always shown now — Logo and KSP always exist, so their own zoom/size
+  // controls should always be reachable, not just when a background scene
+  // is selected (which now only adds the extra BG option).
+  const layerSwitch = document.createElement("div");
+  layerSwitch.className = "layer-switch";
+  layerSwitch.setAttribute("role", "group");
+  layerSwitch.setAttribute("aria-label", `${format.title} edit target`);
 
-    [
-      { key: "sku", label: "SKU" },
-      { key: "background", label: "BG" },
-    ].forEach(({ key, label }) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "layer-switch-btn";
-      button.dataset.layer = key;
-      button.textContent = label;
-      const isActive = key === activeLayerKey;
-      button.classList.toggle("is-active", isActive);
-      button.setAttribute("aria-pressed", String(isActive));
-      layerSwitch.append(button);
-    });
+  const layerOptions = [
+    { key: "logo", label: "Logo" },
+    { key: "ksp", label: "KSP" },
+    { key: "sku", label: "SKU" },
+  ];
+  if (hasSkuBackground(context)) layerOptions.push({ key: "background", label: "BG" });
 
-    layerSwitch.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-layer]");
-      if (!button || button.classList.contains("is-active")) return;
-      setActiveLayer(outputId, button.dataset.layer, context);
-      onRerender();
-    });
+  layerOptions.forEach(({ key, label }) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "layer-switch-btn";
+    button.dataset.layer = key;
+    button.textContent = label;
+    const isActive = key === activeLayerKey;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+    layerSwitch.append(button);
+  });
 
-    actions.append(layerSwitch);
-  }
+  layerSwitch.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-layer]");
+    if (!button || button.classList.contains("is-active")) return;
+    setActiveLayer(outputId, button.dataset.layer, context);
+    onRerender();
+  });
+
+  actions.append(layerSwitch);
 
   const zoomControl = document.createElement("label");
   zoomControl.className = "zoom-control";
   const zoomLabel = document.createElement("span");
-  zoomLabel.textContent = isBackgroundActive ? "Background Zoom" : "SKU Zoom";
   const zoomInput = document.createElement("input");
   zoomInput.type = "range";
-  zoomInput.min = String(SKU_ZOOM_MIN * 100);
-  zoomInput.max = String(SKU_ZOOM_MAX * 100);
-  zoomInput.step = "5";
-  zoomInput.value = String(Math.round(activeLayer.getZoom(outputId) * 100));
-  zoomInput.setAttribute(
-    "aria-label",
-    `${format.title} ${isBackgroundActive ? "background" : "SKU"} zoom`,
-  );
   const zoomValue = document.createElement("span");
   zoomValue.className = "zoom-value";
-  zoomValue.textContent = `${zoomInput.value}%`;
-  zoomInput.addEventListener("input", () => {
-    activeLayer.setZoom(outputId, Number(zoomInput.value) / 100);
+
+  if (isKspActive) {
+    const kspBox = layout.ksp;
+    const savedSize = getKspFontSize(outputId, context);
+    // No manual size set yet — start the slider at whatever auto-fit would
+    // currently render, so grabbing it for the first time doesn't jump the
+    // text to a different size than what's already on screen.
+    const currentSize =
+      savedSize ??
+      computeFittedTextSize(
+        measureCtx,
+        context.ksp,
+        kspBox.width,
+        kspBox.height,
+        kspBox.maxSize,
+        KSP_AUTOFIT_MIN_SIZE,
+        1.04,
+      ).size;
+
+    zoomLabel.textContent = "KSP Font Size";
+    zoomInput.min = String(Math.round(kspBox.minSize));
+    zoomInput.max = String(Math.round(kspBox.maxSize));
+    zoomInput.step = "1";
+    zoomInput.value = String(Math.round(currentSize));
+    zoomInput.setAttribute("aria-label", `${format.title} KSP font size`);
+    zoomValue.textContent = `${zoomInput.value}px`;
+    zoomInput.addEventListener("input", () => {
+      setKspFontSize(outputId, Number(zoomInput.value), layout, context);
+      zoomValue.textContent = `${zoomInput.value}px`;
+      if (canvas) requestCanvasRedraw(outputId, canvas, context);
+    });
+  } else {
+    const zoomMin = isLogoActive ? LOGO_ZOOM_MIN : SKU_ZOOM_MIN;
+    const zoomMax = isLogoActive ? LOGO_ZOOM_MAX : SKU_ZOOM_MAX;
+    const layerNoun = isLogoActive ? "Logo" : isBackgroundActive ? "Background" : "SKU";
+
+    zoomLabel.textContent = `${layerNoun} Zoom`;
+    zoomInput.min = String(zoomMin * 100);
+    zoomInput.max = String(zoomMax * 100);
+    zoomInput.step = "5";
+    zoomInput.value = String(Math.round(activeLayer.getZoom(outputId) * 100));
+    zoomInput.setAttribute("aria-label", `${format.title} ${layerNoun.toLowerCase()} zoom`);
     zoomValue.textContent = `${zoomInput.value}%`;
-    if (canvas) requestCanvasRedraw(outputId, canvas, context);
-  });
+    zoomInput.addEventListener("input", () => {
+      activeLayer.setZoom(outputId, Number(zoomInput.value) / 100);
+      zoomValue.textContent = `${zoomInput.value}%`;
+      if (canvas) requestCanvasRedraw(outputId, canvas, context);
+    });
+  }
+
   zoomControl.append(zoomLabel, zoomInput, zoomValue);
 
   const download = document.createElement("button");
@@ -1753,9 +1907,13 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
   shell.className = "canvas-shell";
   canvas = document.createElement("canvas");
   canvas.className = "asset-canvas";
-  const activeLayerHasImage = isBackgroundActive
-    ? hasSkuBackground(context)
-    : Boolean(context.skuImageUrl);
+  // Only SKU/BG are draggable on the canvas — Logo and KSP are zoom/size-
+  // only controls with no repositioning.
+  const activeLayerHasImage = isDraggableLayer
+    ? isBackgroundActive
+      ? hasSkuBackground(context)
+      : Boolean(context.skuImageUrl)
+    : false;
   if (activeLayerHasImage) canvas.classList.add("can-drag");
   canvas.dataset.output = outputId;
   canvas.setAttribute("aria-label", `${format.title} preview`);
@@ -2707,6 +2865,8 @@ function createBulkRowsFromCsv(text) {
       ksp: normalizedKsp(kspRaw),
       skuPositions: {},
       skuZooms: {},
+      logoZooms: {},
+      kspFontSizes: {},
       activeLayerByOutput: {},
       template: state.template,
       hideLogoContainer: state.hideLogoContainer,
