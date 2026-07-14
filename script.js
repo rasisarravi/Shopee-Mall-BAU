@@ -163,14 +163,20 @@ const payingSellerLayouts = {
     kv: { x: 0, y: 0, width: 581, height: 360 },
     product: { x: 581, y: 0, width: 1200 - 581, height: 360 },
     logo: { x: 126, y: 79, width: 322, height: 107, radius: 19 },
-    ksp: { x: 126, y: 205, width: 320, height: 125, maxSize: 58.67, minSize: 34 },
+    // Widened from the original 320 (x: 126) so two KSP phrases have room to
+    // land on two lines instead of wrapping to three. x shifted to 57 so the
+    // wider box keeps the same horizontal center as the logo box above it
+    // (~287px) rather than growing off-center.
+    ksp: { x: 57, y: 205, width: 460, height: 125, maxSize: 58.67, minSize: 34 },
     productAlign: [0.62, 0.58],
   },
   "Banner Card": {
     kv: { x: 0, y: 0, width: 531, height: 381 },
     product: { x: 0, y: 381, width: 531, height: 792 - 381 },
     logo: { x: 115, y: 100, width: 300, height: 100, radius: 18 },
-    ksp: { x: 110, y: 222, width: 314, height: 100, maxSize: 42, minSize: 24 },
+    // Same fix as Category Banner: widened from 314 (x: 110), re-centered on
+    // the logo box's horizontal center (~265px) at x: 65.
+    ksp: { x: 65, y: 222, width: 400, height: 100, maxSize: 42, minSize: 24 },
     productAlign: [0.5, 0.42],
   },
 };
