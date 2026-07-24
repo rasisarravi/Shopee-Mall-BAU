@@ -117,13 +117,22 @@
           </div>
 
           <div class="form-row">
-            <label for="shopeeLogoToggle">Logo Color</label>
+            <label for="shopeeLogoToggle">Inverse Logo</label>
             <label class="toggle-row span-wide" for="shopeeLogoToggle">
               <input id="shopeeLogoToggle" type="checkbox" />
               <span class="toggle-track" aria-hidden="true"></span>
-              <span>Colored logos for light KV colors</span>
+              <span>Invert the logo color if the KV color is light</span>
             </label>
-            <p class="field-hint">New Arrival badge switches on every output. Shopee icon switches on IG Story & FB Post only. Leave off for dark KV colors, where the default white logos already stand out.</p>
+          </div>
+
+          <div class="form-row">
+            <label for="shopeeMallLogoToggle">Shopee Mall Logo</label>
+            <label class="toggle-row span-wide" for="shopeeMallLogoToggle">
+              <input id="shopeeMallLogoToggle" type="checkbox" checked />
+              <span class="toggle-track" aria-hidden="true"></span>
+              <span>Show "Shopee Mall | 100% ORI" tag</span>
+            </label>
+            <p class="field-hint">Turn off to remove the tag from every output. Not available for 8.8 Paying Seller, whose tag is part of a fixed campaign background.</p>
           </div>
 
           <div class="form-row two-field-row">
@@ -284,8 +293,6 @@
               </button>
             </div>
           </div>
-
-          <button class="generate-button" id="generateButton" type="button">Generate</button>
         </form>
       </aside>
 
@@ -297,6 +304,8 @@
           </div>
           <div class="stage-actions">
             <span class="status-pill" id="statusPill">Ready</span>
+            <button type="button" class="history-button" id="undoButton" disabled title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">Undo</button>
+            <button type="button" class="history-button" id="redoButton" disabled title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">Redo</button>
             <button type="button" id="downloadAllButton">Download ZIP</button>
           </div>
         </div>
@@ -327,11 +336,22 @@
             <span>Brush size</span>
             <input type="range" id="editSkuBrushSize" min="8" max="240" value="40" />
           </label>
+          <div class="edit-sku-tool-group" role="group" aria-label="Canvas backdrop">
+            <button type="button" class="edit-sku-tool-btn is-active" data-backdrop="checker">
+              Checker
+            </button>
+            <button type="button" class="edit-sku-tool-btn" data-backdrop="light">
+              Light
+            </button>
+            <button type="button" class="edit-sku-tool-btn" data-backdrop="dark">
+              Dark
+            </button>
+          </div>
           <button type="button" class="field-action-button edit-sku-reset-button" id="editSkuResetButton">
             Reset
           </button>
         </div>
-        <div class="edit-sku-canvas-wrap">
+        <div class="edit-sku-canvas-wrap" id="editSkuCanvasWrap">
           <canvas id="editSkuCanvas"></canvas>
           <div class="edit-sku-brush-cursor" id="editSkuBrushCursor" aria-hidden="true"></div>
         </div>

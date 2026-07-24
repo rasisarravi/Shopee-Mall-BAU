@@ -9,8 +9,15 @@ const NEW_ARRIVAL_OVERLAY_NO_CONTAINER_BASE =
 const PAYING_SELLER_OVERLAY_BASE = "assets/paying-seller/overlays/";
 const PAYING_SELLER_OVERLAY_NO_CONTAINER_BASE =
   "assets/paying-seller/overlays-no-logo-container/";
+// "Inverse Logo" off (default) = colored/branded; on = plain white. Both the
+// Shopee icon and New Arrival badge always swap between one of these two —
+// unlike the Shopee Mall tag below, neither has a "leave the baked-in
+// overlay art untouched" state, since the overlay's own baked-in versions
+// don't match either the colored or the white variant on their own.
 const ORANGE_SHOPEE_LOGO_URL = "assets/logos/Shopee-Logo-Vertical-Orange-icon.png";
+const SHOPEE_LOGO_WHITE_URL = "assets/logos/shopee-logo-white.png";
 const NEW_ARRIVAL_LOGO_COLOR_URL = "assets/logos/New-Arrival-Logo-Color.png";
+const NEW_ARRIVAL_LOGO_WHITE_URL = "assets/logos/new-arrival-logo-white.png";
 // 8.8 Paying Seller's background is a fixed campaign image (not a flat KV
 // color), and the design only has artwork for these two formats.
 const PAYING_SELLER_TEMPLATE = "8.8 Paying Seller";
@@ -82,6 +89,13 @@ const SKU_BACKGROUNDS = [
     id: "home-living-2",
     label: "Home & Living 2",
     src: `${SKU_BACKGROUND_BASE}home-living-2.png`,
+  },
+  { id: "beauty-4", label: "Beauty 4", src: `${SKU_BACKGROUND_BASE}beauty-4.png` },
+  { id: "beauty-5", label: "Beauty 5", src: `${SKU_BACKGROUND_BASE}beauty-5.png` },
+  {
+    id: "premium-beauty",
+    label: "Premium Beauty",
+    src: `${SKU_BACKGROUND_BASE}premium-beauty.png`,
   },
 ];
 
@@ -211,13 +225,61 @@ const newArrivalLogoColorClearBoxes = {
   "banner-card": { x: 94, y: 78, width: 343, height: 71 },
 };
 
+// Where the baked-in "Shopee Mall | 100% ORI" tag sits within the Mall BAU /
+// Mall BAU New Arrival overlay art, measured directly off the overlay files
+// (each design file is authored ~4.17x the app's own output resolution, so
+// these are already converted down to each format's own coordinate space).
+// Same position in both Mall BAU and New Arrival — only the badge differs
+// between those two templates, not the tag. Not defined for 8.8 Paying
+// Seller: its tag is part of a non-flat campaign background image, not a
+// separate element sitting on a flat color, so it isn't safe to mask the
+// same way.
+const shopeeMallTagBoxes = {
+  "category-banner": { x: 883, y: 41, width: 317, height: 50 },
+  "top-module-banner": { x: 1009, y: 14, width: 116, height: 52 },
+  "fb-post": { x: 793, y: 43, width: 407, height: 65 },
+  "ig-story": { x: 597, y: 222, width: 483, height: 77 },
+  "banner-card": { x: 87, y: 0, width: 358, height: 57 },
+};
+
+// Padded a little beyond the tag's own bounds (clamped to the canvas) so the
+// clear-then-redraw trick fully covers its rounded corners.
+const shopeeMallTagClearBoxes = {
+  "category-banner": { x: 867, y: 25, width: 333, height: 82 },
+  "top-module-banner": { x: 995, y: 0, width: 130, height: 80 },
+  "fb-post": { x: 777, y: 27, width: 423, height: 97 },
+  "ig-story": { x: 581, y: 206, width: 499, height: 109 },
+  "banner-card": { x: 71, y: 0, width: 390, height: 73 },
+};
+
+// "Inverse" tag artwork (Shopee text in red instead of a solid red pill),
+// used only for Banner Card and IG Story when Inverse Logo is on — matches
+// the same "Inverse Logo" toggle that already swaps in colored logo variants
+// for light KV colors elsewhere.
+const SHOPEE_MALL_TAG_INVERSE_URLS = {
+  "banner-card": "assets/logos/shopee-mall-tag-banner-card-inverse.png",
+  "ig-story": "assets/logos/shopee-mall-tag-ig-story-inverse.png",
+};
+
 const state = {
   template: "Mall BAU",
   brandLogoUrl: "",
   brandLogoLabel: "Upload",
   hideLogoContainer: false,
+  // "Inverse Logo" toggle. false (default, unchecked) = colored/branded
+  // Shopee icon + New Arrival badge, and the Shopee Mall tag's baked-in
+  // default (red pill, white text). true (checked) = plain white icon +
+  // badge variants, and the Mall tag's inverse (red text) artwork. See
+  // drawOutput's shopeeIconUrl/newArrivalBadgeUrl/shouldUseInverseShopeeMallTag.
   useOrangeShopeeLogo: false,
   skuImageUrl: DEFAULT_SKU_IMAGE,
+  // The pristine, never-background-removed / never-touched-up photo — set
+  // whenever a genuinely new image is uploaded or loaded by link, but left
+  // untouched by Remove Background or Touch Up saves. Lets the Touch Up
+  // Restore brush bring back pixels from the true original at any time,
+  // even ones Remove Background fully erased, not only ones it left
+  // translucent.
+  originalSkuImageUrl: DEFAULT_SKU_IMAGE,
   skuImageLabel: "Upload",
   skuLink: "",
   ksp: "EXCLUSIVE LAUNCH DISKON 25%",
@@ -236,6 +298,18 @@ const state = {
   // lands exactly where they want (e.g. two phrases landing on two lines
   // instead of the auto-fit algorithm choosing a different break point).
   kspFontSizes: {},
+  // Per-output vertical-only offset (raw pixels from the format's designed
+  // KSP position) set by dragging the KSP box on the canvas. Horizontal
+  // position is never touched — the text always stays centered on the same
+  // horizontal center drawFittedText already uses, only its y shifts.
+  kspOffsets: {},
+  // On/off: hides the baked-in "Shopee Mall | 100% ORI" tag across every
+  // output by painting over it with the flat KV color (no new template
+  // needed — see shopeeMallTagClearBoxes). Only applies to Mall BAU / Mall
+  // BAU New Arrival, whose tag sits on a flat KV-colored area; 8.8 Paying
+  // Seller's tag is baked into a non-flat campaign background image and
+  // isn't affected by this toggle.
+  hideShopeeMallTag: false,
   skuBackgroundIndex: -1, // -1 = "None"; 0..N-1 indexes into SKU_BACKGROUNDS
   skuBackgroundPositions: {},
   skuBackgroundZooms: {},
@@ -260,6 +334,7 @@ const els = {
   brandFileName: document.querySelector("#brandFileName"),
   logoContainerToggle: document.querySelector("#logoContainerToggle"),
   shopeeLogoToggle: document.querySelector("#shopeeLogoToggle"),
+  shopeeMallLogoToggle: document.querySelector("#shopeeMallLogoToggle"),
   skuImageInput: document.querySelector("#skuImageInput"),
   skuFileName: document.querySelector("#skuFileName"),
   skuLink: document.querySelector("#skuLink"),
@@ -277,6 +352,8 @@ const els = {
   editSkuCancelButton: document.querySelector("#editSkuCancelButton"),
   editSkuSaveButton: document.querySelector("#editSkuSaveButton"),
   editSkuBrushCursor: document.querySelector("#editSkuBrushCursor"),
+  editSkuBackdropButtons: document.querySelectorAll("#editSkuOverlay button[data-backdrop]"),
+  editSkuCanvasWrap: document.querySelector("#editSkuCanvasWrap"),
   bgThumbGrid: document.querySelector("#bgThumbGrid"),
   skuBgColorRow: document.querySelector("#skuBgColorRow"),
   skuBgColorInput: document.querySelector("#skuBgColorInput"),
@@ -297,8 +374,9 @@ const els = {
   colorPicker: document.querySelector("#colorPicker"),
   kvColorHint: document.querySelector("#kvColorHint"),
   outputButtons: document.querySelector("#outputButtons"),
-  generateButton: document.querySelector("#generateButton"),
   downloadAllButton: document.querySelector("#downloadAllButton"),
+  undoButton: document.querySelector("#undoButton"),
+  redoButton: document.querySelector("#redoButton"),
   previewList: document.querySelector("#previewList"),
   statusPill: document.querySelector("#statusPill"),
   stageBanner: document.querySelector("#stageBanner"),
@@ -348,6 +426,10 @@ let bgRemovalRunning = false;
 // the untouched baseline image the Restore brush copies from, and the
 // current tool/brush settings for the in-progress session.
 let editSkuState = null;
+// Persists across modal opens within the session (not saved) — "checker" is
+// the original look; "light"/"dark" are solid backdrops that make it easier
+// to spot leftover/under-erased background bits a checkerboard can hide.
+let editSkuBackdrop = "checker";
 
 function editingContext() {
   return activeRow || state;
@@ -357,6 +439,167 @@ function editingOutputs() {
   return activeRow
     ? BULK_OUTPUT_IDS.filter((outputId) => activeRow.outputs.has(outputId))
     : selectedOutputs();
+}
+
+// ---------------------------------------------------------------------------
+// Undo / redo.
+//
+// One history stack per editing context (the single editor's `state`, and
+// each bulk row that's been opened for preview/edit — keyed by object
+// identity via a WeakMap, so switching rows never mixes up their trails).
+// Every discrete edit is one undo step: a color pick, a toggle, a template
+// swap, an image upload/Remove Background run/Touch Up save, one drag
+// gesture start-to-release, or one slider adjustment start-to-release.
+// Continuous interactions commit once at the *start* of the gesture (see
+// commitHistoryStart/commitHistoryEnd below) so a whole drag or slider drag
+// counts as a single step instead of one per intermediate tick.
+// ---------------------------------------------------------------------------
+const historyStore = new WeakMap();
+
+// The fields that make up a context's undoable edit state. Deliberately a
+// fixed allowlist (not the whole context object) so snapshots stay small and
+// can't choke on anything a bulk row might carry that isn't plain edit data
+// (cached fetch/resolve bookkeeping, etc.).
+const HISTORY_FIELDS = [
+  "template",
+  "brandLogoUrl",
+  "brandLogoLabel",
+  "hideLogoContainer",
+  "useOrangeShopeeLogo",
+  "hideShopeeMallTag",
+  "skuImageUrl",
+  "originalSkuImageUrl",
+  "skuImageLabel",
+  "ksp",
+  "kspColor",
+  "kvColor",
+  "outputs",
+  "skuPositions",
+  "skuZooms",
+  "logoZooms",
+  "kspFontSizes",
+  "kspOffsets",
+  "skuBackgroundIndex",
+  "skuBackgroundPositions",
+  "skuBackgroundZooms",
+  "skuBackgroundColor",
+  "activeLayerByOutput",
+  "hue",
+  "saturation",
+  "value",
+];
+const HISTORY_LIMIT = 60;
+
+function getHistory(context) {
+  let entry = historyStore.get(context);
+  if (!entry) {
+    entry = { past: [], future: [], pending: null };
+    historyStore.set(context, entry);
+  }
+  return entry;
+}
+
+function snapshotContext(context) {
+  const snap = {};
+  HISTORY_FIELDS.forEach((key) => {
+    snap[key] = structuredClone(context[key]);
+  });
+  return snap;
+}
+
+function restoreContext(context, snap) {
+  HISTORY_FIELDS.forEach((key) => {
+    if (key in snap) context[key] = structuredClone(snap[key]);
+  });
+}
+
+// Cheap deep-equality so a gesture that opened-and-closed without actually
+// changing anything (e.g. clicking a slider without moving it) doesn't add a
+// no-op undo step. Every field here is plain JSON-safe data except Sets
+// (`outputs`), normalized to a sorted array first.
+function snapshotsEqual(a, b) {
+  const normalize = (snap) => {
+    const copy = {};
+    HISTORY_FIELDS.forEach((key) => {
+      const value = snap[key];
+      copy[key] = value instanceof Set ? Array.from(value).sort() : value;
+    });
+    return JSON.stringify(copy);
+  };
+  return normalize(a) === normalize(b);
+}
+
+// Guards restoreContext() calls (inside undo/redo) from being mistaken for a
+// fresh user edit by anything that happens to call commitHistoryStart/End
+// afterward (e.g. re-syncing the sidebar can re-trigger element listeners).
+let restoringHistory = false;
+
+// Call right before a discrete edit begins (a click, a toggle, the first
+// pointermove of a drag, the first tick of a slider, focusing a text field).
+// Safe to call repeatedly for the same in-progress gesture — only the first
+// call opens a pending "before" snapshot; commitHistoryEnd() closes it.
+function commitHistoryStart(context) {
+  if (restoringHistory) return;
+  const history = getHistory(context);
+  if (history.pending) return;
+  history.pending = snapshotContext(context);
+}
+
+// Call when a gesture ends (pointerup, blur/change, or right after a
+// synchronous mutation). Pushes the pending "before" snapshot onto the undo
+// stack only if the context actually changed, and always clears redo.
+function commitHistoryEnd(context) {
+  if (restoringHistory) return;
+  const history = getHistory(context);
+  if (!history.pending) return;
+  const before = history.pending;
+  history.pending = null;
+  if (snapshotsEqual(before, snapshotContext(context))) return;
+  history.past.push(before);
+  if (history.past.length > HISTORY_LIMIT) history.past.shift();
+  history.future = [];
+  updateUndoRedoButtons();
+}
+
+function undo() {
+  const context = editingContext();
+  const history = getHistory(context);
+  history.pending = null;
+  if (!history.past.length) return;
+  const current = snapshotContext(context);
+  const previous = history.past.pop();
+  history.future.push(current);
+  restoringHistory = true;
+  restoreContext(context, previous);
+  restoringHistory = false;
+  afterHistoryRestore();
+}
+
+function redo() {
+  const context = editingContext();
+  const history = getHistory(context);
+  history.pending = null;
+  if (!history.future.length) return;
+  const current = snapshotContext(context);
+  const next = history.future.pop();
+  history.past.push(current);
+  restoringHistory = true;
+  restoreContext(context, next);
+  restoringHistory = false;
+  afterHistoryRestore();
+}
+
+function afterHistoryRestore() {
+  syncEditorFieldsFromContext();
+  renderPreviews();
+  if (activeRow) renderBulkRows();
+  updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+  const history = getHistory(editingContext());
+  if (els.undoButton) els.undoButton.disabled = history.past.length === 0;
+  if (els.redoButton) els.redoButton.disabled = history.future.length === 0;
 }
 
 function clamp(value, min, max) {
@@ -550,12 +793,12 @@ async function fetchImageObjectUrl(src) {
 
 function setSkuImageUrl(url, labelText) {
   const context = editingContext();
-  if (context.skuImageUrl?.startsWith("blob:") && context.skuImageUrl !== url) {
-    imageCache.delete(context.skuImageUrl);
-    URL.revokeObjectURL(context.skuImageUrl);
-  }
-
+  // The previous blob URL (if any) is deliberately left alive so undo can
+  // restore it — see the comment in removeBackgroundFromSku for why.
   context.skuImageUrl = url;
+  // A freshly loaded image is a new "pristine" original — see the field's
+  // own comment on the state object for what this is used for.
+  context.originalSkuImageUrl = url;
   context.skuImageLabel = labelText || "Linked image";
   context.skuPositions = {};
   context.skuZooms = {};
@@ -595,6 +838,453 @@ function resolveRemoveBackgroundFn(module) {
   return candidates.find((candidate) => typeof candidate === "function") || null;
 }
 
+// Two-threshold ("hysteresis") opacity check instead of one flat cutoff. A
+// pixel only needs to clear the LOW bar if it's directly attached (4-conn)
+// to a pixel that clears the stricter HIGH bar on its own; otherwise it
+// needs to clear HIGH by itself. This keeps bright/white highlight or
+// reflection areas on the product — which the model often scores with
+// lower confidence, since they look similar to a plain light background —
+// as long as they're physically attached to the product's solid, high-
+// confidence body, while still dropping truly disconnected low-confidence
+// noise out in the background.
+const BG_REMOVAL_ALPHA_HIGH = 160;
+const BG_REMOVAL_ALPHA_LOW = 18;
+
+// A pixel also counts as "low confidence but includable" (see isLow above)
+// if its own color is simply nothing like the photo's real background —
+// regardless of what alpha the AI model assigned it. This is what keeps a
+// product's own plain white surface (e.g. the unprinted plastic edge of a
+// pouch/sachet) from being mistaken for background just because the model
+// scored it with low confidence: a plain white product surface photographed
+// against a colored or dark backdrop looks nothing like that backdrop, so
+// it clears this bar even when the AI itself wasn't sure. Genuine
+// background — which, by definition, DOES look like the sampled backdrop
+// color — never clears it, so this can't resurrect real background.
+const BACKGROUND_COLOR_DISTANCE_THRESHOLD = 90;
+
+// A pixel that was already transparent in the SOURCE image passed to the AI
+// model (e.g. an area the user erased by hand with Touch Up before running
+// Remove Background) can never be treated as opaque, no matter how the
+// model's own alpha mask scores it. Without this, a manually-erased region
+// can come back in two ways: the model itself may score a flattened
+// transparent area with real confidence (some decoders flatten transparent
+// pixels to solid black, which can look like a plausible foreground
+// object), or this cleanup pass's own hole-filling (step 2 below) may treat
+// it as an accidental gap to patch. Either way the user's own edit would
+// otherwise get silently overwritten — usually as a solid black patch,
+// since a fully transparent source pixel's RGB is commonly stored as zero.
+const SOURCE_ALPHA_MIN = 10;
+
+// A hole (see step 2 below) is only "fillable" if it doesn't touch the
+// image border, takes up no more than this fraction of the whole image,
+// and doesn't overlap any pixel that was already transparent in the source
+// (see SOURCE_ALPHA_MIN above) — otherwise it's not an accidental AI gap,
+// it's something the user deliberately erased, and must stay removed.
+const HOLE_MAX_FRACTION = 0.3;
+
+// When picking which disconnected piece of the mask is the actual product
+// (see step 4), the piece that occupies the most pixels within this central
+// region of the image wins over a merely-larger piece elsewhere — product
+// photos are normally centered, so a stray leftover chunk (a background
+// prop, promotional text, a second product) that happens to cover more
+// total area shouldn't win just on size. Using overlap with a region
+// rather than a single center pixel avoids a false miss when the exact
+// center pixel lands on a thin gap between two nearby shapes.
+const CENTRAL_REGION_FRACTION = 0.5;
+// The winning piece's overlap with that central region still has to clear
+// this floor, so a tiny sliver of a huge off-center shape poking into the
+// middle doesn't win by default when nothing is genuinely centered.
+const MIN_CENTRAL_OVERLAP_FRACTION = 0.01;
+
+// Radius (in pixels) of the softening pass applied to the final cutout
+// edge, so the boundary is a gentle gradient rather than a hard, jagged
+// binary line.
+const FEATHER_RADIUS = 2;
+
+// Separable box blur (horizontal pass then vertical pass, each an O(width)
+// or O(height) sliding-window sum) — used only to feather the final binary
+// keep-mask, not for any of the region-selection logic above it.
+function boxBlurMask(mask, width, height, radius) {
+  const windowSize = radius * 2 + 1;
+  const temp = new Float32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width;
+    let sum = 0;
+    for (let x = -radius; x <= radius; x++) {
+      sum += mask[rowStart + Math.min(width - 1, Math.max(0, x))];
+    }
+    for (let x = 0; x < width; x++) {
+      temp[rowStart + x] = sum / windowSize;
+      const addX = Math.min(width - 1, x + radius + 1);
+      const removeX = Math.max(0, x - radius);
+      sum += mask[rowStart + addX] - mask[rowStart + removeX];
+    }
+  }
+  const out = new Float32Array(width * height);
+  for (let x = 0; x < width; x++) {
+    let sum = 0;
+    for (let y = -radius; y <= radius; y++) {
+      sum += temp[Math.min(height - 1, Math.max(0, y)) * width + x];
+    }
+    for (let y = 0; y < height; y++) {
+      out[y * width + x] = sum / windowSize;
+      const addY = Math.min(height - 1, y + radius + 1);
+      const removeY = Math.max(0, y - radius);
+      sum += temp[addY * width + x] - temp[removeY * width + x];
+    }
+  }
+  return out;
+}
+
+// Estimates the photo's true background color by taking the per-channel
+// median (via a cheap 0-255 histogram, since color channels only span that
+// range) over a thin strip around the image's outer edge — border pixels in
+// a product photo are almost always real background, not the product
+// itself. Median (rather than average) keeps a few product pixels that
+// happen to touch the border from skewing the estimate. Returns null if
+// every border pixel was already transparent (fully erased), in which case
+// the color-distance signal above is simply skipped rather than guessed at.
+function estimateBorderBackgroundColor(sourcePixels, width, height) {
+  const thickness = Math.max(2, Math.round(Math.min(width, height) * 0.02));
+  const histR = new Uint32Array(256);
+  const histG = new Uint32Array(256);
+  const histB = new Uint32Array(256);
+  let count = 0;
+
+  const addPixel = (x, y) => {
+    const idx = (y * width + x) * 4;
+    if (sourcePixels[idx + 3] < SOURCE_ALPHA_MIN) return;
+    histR[sourcePixels[idx]]++;
+    histG[sourcePixels[idx + 1]]++;
+    histB[sourcePixels[idx + 2]]++;
+    count++;
+  };
+
+  for (let y = 0; y < Math.min(thickness, height); y++) {
+    for (let x = 0; x < width; x++) {
+      addPixel(x, y);
+      addPixel(x, height - 1 - y);
+    }
+  }
+  for (let x = 0; x < Math.min(thickness, width); x++) {
+    for (let y = thickness; y < height - thickness; y++) {
+      addPixel(x, y);
+      addPixel(width - 1 - x, y);
+    }
+  }
+
+  if (count === 0) return null;
+
+  const medianOf = (hist) => {
+    const half = count / 2;
+    let running = 0;
+    for (let v = 0; v < 256; v++) {
+      running += hist[v];
+      if (running >= half) return v;
+    }
+    return 255;
+  };
+
+  return { r: medianOf(histR), g: medianOf(histG), b: medianOf(histB) };
+}
+
+// Cleans up a raw background-removal result: turns the model's alpha mask
+// into a binary cutout with a light feather at the edge (no jagged hard
+// line, no stray translucent halos far from the actual product), fills in
+// any fully enclosed holes accidentally cut out of the middle of the
+// product, and discards every disconnected island except the one most
+// likely to be the actual product — which strips out stray leftover bits
+// like promotional text or background props the model failed to remove,
+// without needing to identify what they are.
+// The final image's colors always come from the original, unprocessed
+// photo (never the model's own output), so cleanup can't introduce any
+// color shift or edge fringing of its own — it only ever decides alpha.
+async function cleanupBackgroundRemovalResult(resultBlob, sourceBlob) {
+  const [resultBitmap, sourceBitmap] = await Promise.all([
+    createImageBitmap(resultBlob),
+    createImageBitmap(sourceBlob),
+  ]);
+
+  const width = resultBitmap.width;
+  const height = resultBitmap.height;
+  const pixelCount = width * height;
+
+  const resultCanvas = document.createElement("canvas");
+  resultCanvas.width = width;
+  resultCanvas.height = height;
+  const resultCtx = resultCanvas.getContext("2d", { willReadFrequently: true });
+  resultCtx.drawImage(resultBitmap, 0, 0, width, height);
+  const resultPixels = resultCtx.getImageData(0, 0, width, height).data;
+
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = width;
+  sourceCanvas.height = height;
+  const sourceCtx = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  // Scaled to the result's own resolution so pixel coordinates line up
+  // exactly even if the model resized the image.
+  sourceCtx.drawImage(sourceBitmap, 0, 0, width, height);
+  const sourcePixels = sourceCtx.getImageData(0, 0, width, height).data;
+
+  // 1) Hysteresis opacity per pixel, from the model's own alpha channel:
+  // every HIGH-confidence pixel is opaque, and so is every LOW-confidence
+  // pixel reachable from one through a chain of other LOW-confidence
+  // pixels — this is what lets an attached white highlight survive even
+  // though the model scored it less confidently than the rest of the
+  // product. "Low confidence" also includes any pixel whose color simply
+  // doesn't match the photo's real background (see
+  // BACKGROUND_COLOR_DISTANCE_THRESHOLD above), which is what rescues a
+  // product's own plain white surface even when the model was confident
+  // (wrongly) that it was background. Either bar is gated on the SOURCE
+  // pixel also being non-transparent, so a spot the user already erased in
+  // Touch Up before running Remove Background can never be resurrected
+  // here.
+  const backgroundColor = estimateBorderBackgroundColor(sourcePixels, width, height);
+  const isHigh = new Uint8Array(pixelCount);
+  const isLow = new Uint8Array(pixelCount);
+  for (let i = 0; i < pixelCount; i++) {
+    const o = i * 4;
+    const alpha = resultPixels[o + 3];
+    const sourceAlpha = sourcePixels[o + 3];
+    const sourceHasContent = sourceAlpha >= SOURCE_ALPHA_MIN;
+
+    // Only ever ADDS an extra way to qualify as "includable" — if the
+    // background color couldn't be estimated (e.g. every border pixel was
+    // already erased), this stays false and isLow falls back to the plain
+    // alpha check below, exactly like before this signal existed.
+    let colorSuggestsProduct = false;
+    if (backgroundColor) {
+      const dr = sourcePixels[o] - backgroundColor.r;
+      const dg = sourcePixels[o + 1] - backgroundColor.g;
+      const db = sourcePixels[o + 2] - backgroundColor.b;
+      const colorDistance = Math.sqrt(dr * dr + dg * dg + db * db);
+      colorSuggestsProduct = colorDistance >= BACKGROUND_COLOR_DISTANCE_THRESHOLD;
+    }
+
+    isHigh[i] = alpha >= BG_REMOVAL_ALPHA_HIGH && sourceHasContent ? 1 : 0;
+    isLow[i] =
+      (alpha >= BG_REMOVAL_ALPHA_LOW || colorSuggestsProduct) && sourceHasContent ? 1 : 0;
+  }
+
+  const isOpaque = new Uint8Array(pixelCount);
+  const hysteresisStack = new Int32Array(pixelCount);
+  let hysteresisStackSize = 0;
+
+  const tryExpandOpaque = (idx) => {
+    if (isLow[idx] && !isOpaque[idx]) {
+      isOpaque[idx] = 1;
+      hysteresisStack[hysteresisStackSize++] = idx;
+    }
+  };
+
+  for (let i = 0; i < pixelCount; i++) {
+    if (isHigh[i]) tryExpandOpaque(i);
+  }
+
+  while (hysteresisStackSize > 0) {
+    const idx = hysteresisStack[--hysteresisStackSize];
+    const x = idx % width;
+    const y = (idx / width) | 0;
+    if (x > 0) tryExpandOpaque(idx - 1);
+    if (x < width - 1) tryExpandOpaque(idx + 1);
+    if (y > 0) tryExpandOpaque(idx - width);
+    if (y < height - 1) tryExpandOpaque(idx + width);
+  }
+
+  // 2) Label connected components of TRANSPARENT pixels only (4-connected),
+  // tracking each component's pixel count and whether it touches the image
+  // border. A transparent region that never touches the border is fully
+  // enclosed by opaque pixels — a hole accidentally cut out of the middle
+  // of the product — but it's only treated as "fillable" when it's small
+  // relative to the whole image (see HOLE_MAX_FRACTION below).
+  //
+  // That size cap matters for a degenerate case: a product photo where the
+  // subject bleeds to all four edges has no transparent pixel anywhere on
+  // the border. Without the cap, the entire background would read as one
+  // giant "enclosed hole" (nothing reaches the border to disprove it) and
+  // get filled solid, silently undoing the cutout. Requiring holes to stay
+  // small keeps genuine background — even background that happens not to
+  // touch an edge — from ever being swallowed whole.
+  const holeSizeLimit = pixelCount * HOLE_MAX_FRACTION;
+
+  const transparentLabels = new Int32Array(pixelCount).fill(-1);
+  const stack = new Int32Array(pixelCount);
+  let stackSize = 0;
+  const fillableHole = [];
+
+  for (let start = 0; start < pixelCount; start++) {
+    if (isOpaque[start] || transparentLabels[start] !== -1) continue;
+    const label = fillableHole.length;
+    let size = 0;
+    let touchesBorder = false;
+    let touchesSourceTransparency = false;
+    stackSize = 0;
+    stack[stackSize++] = start;
+    transparentLabels[start] = label;
+    while (stackSize > 0) {
+      const idx = stack[--stackSize];
+      size++;
+      const x = idx % width;
+      const y = (idx / width) | 0;
+      if (x === 0 || x === width - 1 || y === 0 || y === height - 1) touchesBorder = true;
+      if (sourcePixels[idx * 4 + 3] < SOURCE_ALPHA_MIN) touchesSourceTransparency = true;
+      if (x > 0) {
+        const n = idx - 1;
+        if (!isOpaque[n] && transparentLabels[n] === -1) {
+          transparentLabels[n] = label;
+          stack[stackSize++] = n;
+        }
+      }
+      if (x < width - 1) {
+        const n = idx + 1;
+        if (!isOpaque[n] && transparentLabels[n] === -1) {
+          transparentLabels[n] = label;
+          stack[stackSize++] = n;
+        }
+      }
+      if (y > 0) {
+        const n = idx - width;
+        if (!isOpaque[n] && transparentLabels[n] === -1) {
+          transparentLabels[n] = label;
+          stack[stackSize++] = n;
+        }
+      }
+      if (y < height - 1) {
+        const n = idx + width;
+        if (!isOpaque[n] && transparentLabels[n] === -1) {
+          transparentLabels[n] = label;
+          stack[stackSize++] = n;
+        }
+      }
+    }
+    fillableHole.push(!touchesBorder && size <= holeSizeLimit && !touchesSourceTransparency);
+  }
+
+  // 3) Treat only small, fully-enclosed holes as part of whatever solid
+  // region surrounds them, so the connected-component pass below groups
+  // them together with the product. Background too large to plausibly be
+  // an accidental hole stays transparent instead.
+  const isFilled = new Uint8Array(pixelCount);
+  for (let i = 0; i < pixelCount; i++) {
+    const label = transparentLabels[i];
+    isFilled[i] = isOpaque[i] || (label !== -1 && fillableHole[label]) ? 1 : 0;
+  }
+
+  // 4) Connected-component labeling over the filled mask; track each
+  // component's total pixel area (to find the largest, as a fallback) and
+  // how many of its pixels fall inside the central region of the image
+  // (the preferred pick — see CENTRAL_REGION_FRACTION above).
+  const centralMinX = Math.round((width * (1 - CENTRAL_REGION_FRACTION)) / 2);
+  const centralMaxX = width - centralMinX;
+  const centralMinY = Math.round((height * (1 - CENTRAL_REGION_FRACTION)) / 2);
+  const centralMaxY = height - centralMinY;
+
+  const labels = new Int32Array(pixelCount).fill(-1);
+  const componentSizes = [];
+  const componentCentralOverlaps = [];
+  let largestLabel = -1;
+  let largestSize = 0;
+  let nextLabel = 0;
+
+  for (let start = 0; start < pixelCount; start++) {
+    if (!isFilled[start] || labels[start] !== -1) continue;
+    let size = 0;
+    let centralOverlap = 0;
+    stackSize = 0;
+    stack[stackSize++] = start;
+    labels[start] = nextLabel;
+    while (stackSize > 0) {
+      const idx = stack[--stackSize];
+      size++;
+      const x = idx % width;
+      const y = (idx / width) | 0;
+      if (x >= centralMinX && x < centralMaxX && y >= centralMinY && y < centralMaxY) {
+        centralOverlap++;
+      }
+      if (x > 0) {
+        const n = idx - 1;
+        if (isFilled[n] && labels[n] === -1) {
+          labels[n] = nextLabel;
+          stack[stackSize++] = n;
+        }
+      }
+      if (x < width - 1) {
+        const n = idx + 1;
+        if (isFilled[n] && labels[n] === -1) {
+          labels[n] = nextLabel;
+          stack[stackSize++] = n;
+        }
+      }
+      if (y > 0) {
+        const n = idx - width;
+        if (isFilled[n] && labels[n] === -1) {
+          labels[n] = nextLabel;
+          stack[stackSize++] = n;
+        }
+      }
+      if (y < height - 1) {
+        const n = idx + width;
+        if (isFilled[n] && labels[n] === -1) {
+          labels[n] = nextLabel;
+          stack[stackSize++] = n;
+        }
+      }
+    }
+    componentSizes[nextLabel] = size;
+    componentCentralOverlaps[nextLabel] = centralOverlap;
+    if (size > largestSize) {
+      largestSize = size;
+      largestLabel = nextLabel;
+    }
+    nextLabel++;
+  }
+
+  // Prefer whichever component covers the most pixels inside the central
+  // region over the largest one overall, as long as that coverage clears a
+  // sensible floor — the product in these photos is almost always
+  // centered, so this correctly overrides "largest" when a bigger stray
+  // leftover elsewhere (a second product, a promotional photo, leftover
+  // text) would otherwise win just by covering more total area.
+  let chosenLabel = largestLabel;
+  let bestCentralOverlap = pixelCount * MIN_CENTRAL_OVERLAP_FRACTION;
+  for (let label = 0; label < nextLabel; label++) {
+    if (componentCentralOverlaps[label] > bestCentralOverlap) {
+      bestCentralOverlap = componentCentralOverlaps[label];
+      chosenLabel = label;
+    }
+  }
+
+  // 5) Feather the chosen component's edge with a small blur so the cutout
+  // boundary is a soft gradient instead of a hard, jagged binary line.
+  const keepMask = new Float32Array(pixelCount);
+  if (chosenLabel >= 0) {
+    for (let i = 0; i < pixelCount; i++) {
+      keepMask[i] = labels[i] === chosenLabel ? 1 : 0;
+    }
+  }
+  const featheredAlpha = boxBlurMask(keepMask, width, height, FEATHER_RADIUS);
+
+  // 6) Final image: the original photo's own colors everywhere, alpha from
+  // the feathered mask above — no stray disconnected leftovers, no hard
+  // pixel-perfect zigzag edge.
+  const outImageData = resultCtx.createImageData(width, height);
+  const outPixels = outImageData.data;
+  for (let i = 0; i < pixelCount; i++) {
+    const o = i * 4;
+    outPixels[o] = sourcePixels[o];
+    outPixels[o + 1] = sourcePixels[o + 1];
+    outPixels[o + 2] = sourcePixels[o + 2];
+    outPixels[o + 3] = Math.round(Math.min(1, Math.max(0, featheredAlpha[i])) * 255);
+  }
+  resultCtx.putImageData(outImageData, 0, 0);
+
+  return new Promise((resolve, reject) => {
+    resultCanvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Background removal cleanup could not encode the result."));
+    }, "image/png");
+  });
+}
+
 // Runs in-browser background removal on the current context's SKU image and
 // swaps the result in. Unlike setSkuImageUrl, this intentionally keeps the
 // existing skuPositions/skuZooms so a photo the user already framed doesn't
@@ -610,6 +1300,7 @@ async function removeBackgroundFromSku() {
   }
 
   const button = els.removeBgButton;
+  commitHistoryStart(context);
   bgRemovalRunning = true;
   const originalLabel = button.textContent;
   button.disabled = true;
@@ -631,7 +1322,7 @@ async function removeBackgroundFromSku() {
     const sourceResponse = await fetch(context.skuImageUrl);
     const sourceBlob = await sourceResponse.blob();
 
-    const resultBlob = await removeBackground(sourceBlob, {
+    const rawResultBlob = await removeBackground(sourceBlob, {
       output: { format: "image/png", quality: 1 },
       progress: (key, current, total) => {
         if (!total) return;
@@ -640,8 +1331,14 @@ async function removeBackgroundFromSku() {
       },
     });
 
+    button.textContent = "Cleaning up...";
+    // Post-process the model's raw cutout: binary (non-translucent) edges,
+    // holes in the middle of the product filled back in, and every
+    // disconnected leftover bit (stray promotional text, background props)
+    // discarded except the single largest piece.
+    const resultBlob = await cleanupBackgroundRemovalResult(rawResultBlob, sourceBlob);
+
     const newUrl = URL.createObjectURL(resultBlob);
-    const previousUrl = context.skuImageUrl;
 
     // The row/state this run started on always gets the result, even if the
     // user has since switched to editing something else (only one removal
@@ -651,10 +1348,11 @@ async function removeBackgroundFromSku() {
       ? `${context.skuImageLabel} (BG removed)`
       : "Background removed";
 
-    if (previousUrl.startsWith("blob:")) {
-      imageCache.delete(previousUrl);
-      URL.revokeObjectURL(previousUrl);
-    }
+    // The previous blob URL is deliberately left alive (not revoked) — undo
+    // can restore skuImageUrl back to it, and a revoked blob: URL would fail
+    // to load. Blob URLs are only ever released on page unload as a result;
+    // a session's worth of image swaps is a small, acceptable amount of
+    // memory to keep undo/redo correct.
 
     // But only touch what's currently on screen if that's still this same
     // context — otherwise we'd stomp the filename label/preview of whatever
@@ -677,6 +1375,7 @@ async function removeBackgroundFromSku() {
       }
     }
   } finally {
+    commitHistoryEnd(context);
     bgRemovalRunning = false;
     button.disabled = !editingContext().skuImageUrl;
     button.textContent = originalLabel;
@@ -710,6 +1409,14 @@ async function openEditSkuModal() {
     return;
   }
 
+  // The Restore brush can bring back pixels from the very first, pristine
+  // photo this context ever had — not just whatever Remove Background or a
+  // prior Touch Up session left behind — so it can undo a fully-erased spot,
+  // not only one that was left translucent. Falls back to the current image
+  // if no pristine original was ever recorded (e.g. an older bulk row).
+  const restoreSourceImage =
+    (await loadImage(context.originalSkuImageUrl)) || image;
+
   const canvas = els.editSkuCanvas;
   canvas.width = image.naturalWidth || image.width;
   canvas.height = image.naturalHeight || image.height;
@@ -717,9 +1424,18 @@ async function openEditSkuModal() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
+  // Pre-rendered once at the canvas's own resolution, so every brush stamp
+  // afterward is a cheap direct sample instead of re-scaling the (possibly
+  // differently-sized) original photo each time.
+  const restoreCanvas = document.createElement("canvas");
+  restoreCanvas.width = canvas.width;
+  restoreCanvas.height = canvas.height;
+  restoreCanvas.getContext("2d").drawImage(restoreSourceImage, 0, 0, canvas.width, canvas.height);
+
   editSkuState = {
     context,
     baselineImage: image,
+    restoreCanvas,
     canvas,
     ctx,
     tool: "erase",
@@ -729,7 +1445,22 @@ async function openEditSkuModal() {
   };
 
   setEditSkuTool("erase");
+  setEditSkuBackdrop(editSkuBackdrop);
   if (els.editSkuOverlay) els.editSkuOverlay.hidden = false;
+}
+
+// Swaps the canvas backdrop between the original checkerboard and a solid
+// light/dark fill — a flat backdrop makes leftover or under-erased
+// background bits much easier to spot than the checker pattern can.
+function setEditSkuBackdrop(mode) {
+  editSkuBackdrop = mode;
+  if (els.editSkuCanvasWrap) {
+    els.editSkuCanvasWrap.classList.toggle("is-backdrop-light", mode === "light");
+    els.editSkuCanvasWrap.classList.toggle("is-backdrop-dark", mode === "dark");
+  }
+  els.editSkuBackdropButtons?.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.backdrop === mode);
+  });
 }
 
 function closeEditSkuModal() {
@@ -810,7 +1541,7 @@ function createBrushGradient(ctx, x, y, radius) {
 // "source-over" (the canvas default) instead works everywhere and gives
 // Restore the same feathered edge as Erase.
 function editSkuBrushStamp(point) {
-  const { ctx, tool, baselineImage, canvas, brushSize } = editSkuState;
+  const { ctx, tool, restoreCanvas, canvas, brushSize } = editSkuState;
   const radius = brushSize / 2;
 
   if (tool === "erase") {
@@ -846,14 +1577,15 @@ function editSkuBrushStamp(point) {
   patchCtx.arc(radius, radius, radius, 0, Math.PI * 2);
   patchCtx.fill();
 
-  // Swap the gradient's flat color for the baseline image while keeping its
-  // faded alpha shape ("source-in" keeps only what's already covered by the
-  // gradient). Drawing the whole baseline image offset like this is safe —
-  // canvases silently clip anything outside their own small bounds, so
-  // there's no need to clamp the source rectangle by hand.
+  // Swap the gradient's flat color for the restore-source image (the
+  // pristine original, pre-rendered onto restoreCanvas in openEditSkuModal)
+  // while keeping its faded alpha shape ("source-in" keeps only what's
+  // already covered by the gradient). Drawing the whole canvas offset like
+  // this is safe — canvases silently clip anything outside their own small
+  // bounds, so there's no need to clamp the source rectangle by hand.
   patchCtx.globalCompositeOperation = "source-in";
   patchCtx.drawImage(
-    baselineImage,
+    restoreCanvas,
     -(point.x - radius),
     -(point.y - radius),
     canvas.width,
@@ -895,25 +1627,24 @@ function resetEditSkuCanvas() {
 async function saveEditSkuCanvas() {
   if (!editSkuState) return;
   const { canvas, context } = editSkuState;
+  commitHistoryStart(context);
 
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) {
+    commitHistoryEnd(context);
     closeEditSkuModal();
     return;
   }
 
   const newUrl = URL.createObjectURL(blob);
-  const previousUrl = context.skuImageUrl;
 
   context.skuImageUrl = newUrl;
   context.skuImageLabel = context.skuImageLabel
     ? `${context.skuImageLabel} (touched up)`
     : "Touched up";
 
-  if (previousUrl?.startsWith("blob:")) {
-    imageCache.delete(previousUrl);
-    URL.revokeObjectURL(previousUrl);
-  }
+  // The previous blob URL is deliberately left alive (not revoked) so undo
+  // can restore it — see the comment in removeBackgroundFromSku.
 
   // Same "only touch what's on screen if it's still this context" guard used
   // by Remove Background — harmless here since the modal blocks all other
@@ -924,6 +1655,7 @@ async function saveEditSkuCanvas() {
     await renderPreviews();
   }
 
+  commitHistoryEnd(context);
   closeEditSkuModal();
 }
 
@@ -943,10 +1675,12 @@ async function loadSkuImageFromInput() {
     return;
   }
 
+  const context = editingContext();
   const originalLabel = els.loadSkuLinkButton.textContent;
   els.loadSkuLinkButton.disabled = true;
   els.loadSkuLinkButton.textContent = "Loading...";
   setStatus("Loading image");
+  commitHistoryStart(context);
 
   try {
     let loadedUrl = "";
@@ -973,6 +1707,7 @@ async function loadSkuImageFromInput() {
     setStatus("Image load failed");
     window.setTimeout(() => setStatus("Ready"), 2200);
   } finally {
+    commitHistoryEnd(context);
     els.loadSkuLinkButton.disabled = false;
     els.loadSkuLinkButton.textContent = originalLabel;
   }
@@ -1428,6 +2163,19 @@ function setKspFontSize(outputId, size, layout, context = state) {
   context.kspFontSizes[outputId] = clamp(size, layout.ksp.minSize, layout.ksp.maxSize);
 }
 
+// Vertical-only drag offset for the KSP box, in raw pixels from the format's
+// designed y position — no clamping, same "pixel for pixel, no limits"
+// philosophy as SKU/background drag. Horizontal position is never touched:
+// drawFittedText always centers on the box's own horizontal center, so the
+// text stays anchored there regardless of this offset.
+function getKspOffsetY(outputId, context = state) {
+  return context.kspOffsets[outputId] || 0;
+}
+
+function setKspOffsetY(outputId, offsetY, context = state) {
+  context.kspOffsets[outputId] = Number.isFinite(offsetY) ? offsetY : 0;
+}
+
 function hasSkuBackground(context = state) {
   return context.skuBackgroundIndex >= 0 && context.skuBackgroundIndex < SKU_BACKGROUNDS.length;
 }
@@ -1556,6 +2304,78 @@ function getOverlaySrc(format, context = state) {
   return format.overlay;
 }
 
+// Re-paints whatever should actually be showing behind a clear-then-redraw
+// box (used to hide/swap the Shopee Mall tag and similar overlay elements)
+// instead of a flat KV-color fill, which only looks right when the box sits
+// entirely within the flat KV area. Several of these boxes (e.g. the tag on
+// Category Banner / Top Module Banner / FB Post) actually sit over the
+// product area, which can hold a background scene, an SKU photo, or neither
+// — a flat kvColor fill there would leave a visibly wrong solid block
+// instead of blending in. Clipping to `box` and replaying the same
+// background/product drawing calls used earlier in drawOutput keeps this
+// correct regardless of where the box falls.
+function repaintBehindClearBox(ctx, box, outputId, format, layout, context, layers) {
+  const { skuImage, backgroundImage, photoOverride } = layers;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x, box.y, box.width, box.height);
+  ctx.clip();
+
+  ctx.fillStyle = context.skuBackgroundColor || "#FFF3F6";
+  ctx.fillRect(0, 0, format.width, format.height);
+  if (context.template !== PAYING_SELLER_TEMPLATE) {
+    ctx.fillStyle = context.kvColor;
+    ctx.fillRect(layout.kv.x, layout.kv.y, layout.kv.width, layout.kv.height);
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(layout.product.x, layout.product.y, layout.product.width, layout.product.height);
+  ctx.clip();
+  if (photoOverride) {
+    ctx.drawImage(
+      photoOverride,
+      layout.product.x,
+      layout.product.y,
+      layout.product.width,
+      layout.product.height,
+    );
+  } else {
+    if (backgroundImage) {
+      const bgPosition = getSkuBackgroundPosition(outputId, layout, backgroundImage, context);
+      const bgZoom = getSkuBackgroundZoom(outputId, context);
+      drawCover(
+        ctx,
+        backgroundImage,
+        layout.product.x,
+        layout.product.y,
+        layout.product.width,
+        layout.product.height,
+        bgPosition.x,
+        bgPosition.y,
+        bgZoom,
+      );
+    }
+    if (skuImage) {
+      const skuPosition = getSkuPosition(outputId, layout, skuImage, context);
+      const skuZoom = getSkuZoom(outputId, context);
+      drawCover(
+        ctx,
+        skuImage,
+        layout.product.x,
+        layout.product.y,
+        layout.product.width,
+        layout.product.height,
+        skuPosition.x,
+        skuPosition.y,
+        skuZoom,
+      );
+    }
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
 async function drawOutput(outputId, canvas, options = {}) {
   const { scale = 1, photoOverride = null, context = state } = options;
   const format = outputMeta[outputId];
@@ -1568,23 +2388,51 @@ async function drawOutput(outputId, canvas, options = {}) {
 
   await ensureFont();
 
-  const shouldUseOrangeShopeeLogo =
-    context.useOrangeShopeeLogo && EXTERNAL_SHOPEE_LOGO_OUTPUTS.has(outputId);
+  // "Inverse Logo" unchecked (default) = colored/branded Shopee icon + New
+  // Arrival badge. Checked = their plain white counterparts instead. Both
+  // always swap between one of these two — the overlay's own baked-in art
+  // for these two elements doesn't match either variant on its own, so
+  // there's no "leave it untouched" state here (unlike the Mall tag below).
+  const shouldSwapShopeeIcon = EXTERNAL_SHOPEE_LOGO_OUTPUTS.has(outputId);
+  const shopeeIconUrl = context.useOrangeShopeeLogo ? SHOPEE_LOGO_WHITE_URL : ORANGE_SHOPEE_LOGO_URL;
   // Applies on every format (not just IG Story / FB Post) since the New
   // Arrival badge shows up on all of them, unlike the Shopee icon swap.
-  const shouldUseColorNewArrivalLogo =
+  const shouldSwapNewArrivalBadge =
+    context.template === "Mall BAU New Arrival" && Boolean(newArrivalLogoColorBoxes[outputId]);
+  const newArrivalBadgeUrl = context.useOrangeShopeeLogo
+    ? NEW_ARRIVAL_LOGO_WHITE_URL
+    : NEW_ARRIVAL_LOGO_COLOR_URL;
+  // The Shopee Mall tag mask/swap only applies to Mall BAU / Mall BAU New
+  // Arrival — 8.8 Paying Seller's tag is baked into a non-flat campaign
+  // background image, so there's no safe flat-color clear for it there.
+  const shopeeMallTagEligible =
+    context.template !== PAYING_SELLER_TEMPLATE && Boolean(shopeeMallTagBoxes[outputId]);
+  const shouldHideShopeeMallTag = context.hideShopeeMallTag && shopeeMallTagEligible;
+  // Unlike the icon/badge above, the tag's baked-in default (a solid red
+  // pill, white text) IS the "off" look, so it only actively swaps when
+  // Inverse Logo is checked — off leaves the overlay's own art untouched.
+  const shouldUseInverseShopeeMallTag =
+    !shouldHideShopeeMallTag &&
     context.useOrangeShopeeLogo &&
-    context.template === "Mall BAU New Arrival" &&
-    Boolean(newArrivalLogoColorBoxes[outputId]);
-  const [brandLogo, skuImage, overlay, orangeShopeeLogo, backgroundImage, newArrivalLogoColor] =
-    await Promise.all([
-      loadImage(context.brandLogoUrl),
-      photoOverride ? Promise.resolve(null) : loadImage(context.skuImageUrl),
-      loadImage(getOverlaySrc(format, context)),
-      loadImage(shouldUseOrangeShopeeLogo ? ORANGE_SHOPEE_LOGO_URL : ""),
-      photoOverride ? Promise.resolve(null) : loadImage(getSkuBackgroundSrc(context)),
-      loadImage(shouldUseColorNewArrivalLogo ? NEW_ARRIVAL_LOGO_COLOR_URL : ""),
-    ]);
+    shopeeMallTagEligible &&
+    Boolean(SHOPEE_MALL_TAG_INVERSE_URLS[outputId]);
+  const [
+    brandLogo,
+    skuImage,
+    overlay,
+    shopeeIcon,
+    backgroundImage,
+    newArrivalBadge,
+    inverseShopeeMallTag,
+  ] = await Promise.all([
+    loadImage(context.brandLogoUrl),
+    photoOverride ? Promise.resolve(null) : loadImage(context.skuImageUrl),
+    loadImage(getOverlaySrc(format, context)),
+    loadImage(shouldSwapShopeeIcon ? shopeeIconUrl : ""),
+    photoOverride ? Promise.resolve(null) : loadImage(getSkuBackgroundSrc(context)),
+    loadImage(shouldSwapNewArrivalBadge ? newArrivalBadgeUrl : ""),
+    loadImage(shouldUseInverseShopeeMallTag ? SHOPEE_MALL_TAG_INVERSE_URLS[outputId] : ""),
+  ]);
 
   ctx.clearRect(0, 0, format.width, format.height);
   const layout = drawBackground(ctx, format, context);
@@ -1640,35 +2488,60 @@ async function drawOutput(outputId, canvas, options = {}) {
 
   // The overlay contains fixed elements from the working file, including the ribbon.
   drawStretch(ctx, overlay, 0, 0, format.width, format.height);
-  if (shouldUseOrangeShopeeLogo && orangeShopeeLogo) {
+  if (shouldSwapShopeeIcon && shopeeIcon) {
     const clearBox = externalShopeeLogoClearBoxes[outputId];
     const logoBox = externalShopeeLogoBoxes[outputId];
     ctx.fillStyle = context.kvColor;
     ctx.fillRect(clearBox.x, clearBox.y, clearBox.width, clearBox.height);
     // drawContain (not a stretch) keeps the asset's own aspect ratio intact,
     // fitting and centering it inside the box instead of distorting it.
-    drawContain(ctx, orangeShopeeLogo, logoBox.x, logoBox.y, logoBox.width, logoBox.height);
+    drawContain(ctx, shopeeIcon, logoBox.x, logoBox.y, logoBox.width, logoBox.height);
   }
-  if (shouldUseColorNewArrivalLogo && newArrivalLogoColor) {
-    // Same clear-then-redraw technique as the Shopee logo swap above: the
-    // white "NEW ARRIVAL" badge is baked into the overlay art, so we paint
-    // over it with the flat KV color, then draw the colored version at the
-    // exact same spot — position/size never change, only the asset does.
+  if (shouldSwapNewArrivalBadge && newArrivalBadge) {
+    // Same clear-then-redraw technique as the Shopee icon swap above: the
+    // baked-in "NEW ARRIVAL" badge doesn't match either variant on its own,
+    // so we paint over it with the flat KV color, then draw whichever
+    // variant applies at the exact same spot — position/size never change,
+    // only the asset does.
     const naClearBox = newArrivalLogoColorClearBoxes[outputId];
     const naLogoBox = newArrivalLogoColorBoxes[outputId];
     ctx.fillStyle = context.kvColor;
     ctx.fillRect(naClearBox.x, naClearBox.y, naClearBox.width, naClearBox.height);
     drawContain(
       ctx,
-      newArrivalLogoColor,
+      newArrivalBadge,
       naLogoBox.x,
       naLogoBox.y,
       naLogoBox.width,
       naLogoBox.height,
     );
   }
+  if (shouldHideShopeeMallTag) {
+    const tagClearBox = shopeeMallTagClearBoxes[outputId];
+    repaintBehindClearBox(ctx, tagClearBox, outputId, format, layout, context, {
+      skuImage,
+      backgroundImage,
+      photoOverride,
+    });
+  } else if (shouldUseInverseShopeeMallTag && inverseShopeeMallTag) {
+    // Same clear-then-redraw idea as the logo swaps above, but the "clear"
+    // repaints whatever should actually be behind the tag (KV color,
+    // background scene, or SKU photo) rather than always assuming flat KV.
+    const tagClearBox = shopeeMallTagClearBoxes[outputId];
+    const tagBox = shopeeMallTagBoxes[outputId];
+    repaintBehindClearBox(ctx, tagClearBox, outputId, format, layout, context, {
+      skuImage,
+      backgroundImage,
+      photoOverride,
+    });
+    drawContain(ctx, inverseShopeeMallTag, tagBox.x, tagBox.y, tagBox.width, tagBox.height);
+  }
+
   drawBrandLogo(ctx, brandLogo, layout.logo, context, outputId);
-  drawFittedText(ctx, context.ksp, layout.ksp, {
+  // Vertical-only drag offset — horizontal position is untouched, so the
+  // text stays centered on the box's own horizontal center either way.
+  const kspBox = { ...layout.ksp, y: layout.ksp.y + getKspOffsetY(outputId, context) };
+  drawFittedText(ctx, context.ksp, kspBox, {
     color: context.kspColor,
     maxSize: layout.ksp.maxSize,
     minSize: KSP_AUTOFIT_MIN_SIZE,
@@ -1719,6 +2592,7 @@ function requestCanvasRedraw(outputId, canvas, context = state) {
 function endSkuDrag(event) {
   if (!skuDrag || (event?.pointerId && event.pointerId !== skuDrag.pointerId)) return;
   skuDrag.canvas.classList.remove("is-dragging");
+  commitHistoryEnd(skuDrag.context);
   skuDrag = null;
   setStatus("Ready");
 }
@@ -1729,12 +2603,36 @@ function bindSkuDrag(canvas, outputId, context = state) {
 
     const layout = getLayout(outputMeta[outputId], context);
     const point = canvasPointFromEvent(canvas, event);
-    if (!pointInsideBox(point, layout.product)) return;
-
     const layerKey = getActiveLayer(outputId, context);
-    // Logo and KSP have no drag/reposition — only their zoom/size slider —
-    // so clicking the product area while either is the active layer does
-    // nothing rather than trying to drag a layer that isn't draggable.
+
+    // KSP has no image to load — it's a vertical-only text-box drag, hit
+    // tested against its own box (which usually sits outside the product
+    // rect), not the product area sku/background dragging uses. The box is
+    // shifted by any existing drag offset first, so the hit test matches
+    // where the text is actually rendered, not its un-dragged design position.
+    if (layerKey === "ksp") {
+      const kspHitBox = { ...layout.ksp, y: layout.ksp.y + getKspOffsetY(outputId, context) };
+      if (!pointInsideBox(point, kspHitBox)) return;
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+      canvas.classList.add("is-dragging");
+      commitHistoryStart(context);
+      skuDrag = {
+        canvas,
+        outputId,
+        layerKey,
+        context,
+        pointerId: event.pointerId,
+        image: null,
+        lastPoint: point,
+      };
+      setStatus("Positioning");
+      return;
+    }
+
+    if (!pointInsideBox(point, layout.product)) return;
+    // Logo has no drag/reposition — only its zoom slider — so clicking the
+    // product area while it's the active layer does nothing.
     if (layerKey !== "sku" && layerKey !== "background") return;
     const image = await loadImage(getSkuLayers(context)[layerKey].getImageUrl());
     if (!image) return;
@@ -1742,6 +2640,7 @@ function bindSkuDrag(canvas, outputId, context = state) {
     event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("is-dragging");
+    commitHistoryStart(context);
     skuDrag = {
       canvas,
       outputId,
@@ -1763,7 +2662,11 @@ function bindSkuDrag(canvas, outputId, context = state) {
     const deltaY = point.y - skuDrag.lastPoint.y;
     skuDrag.lastPoint = point;
 
-    updateLayerPositionFromDrag(outputId, skuDrag.layerKey, skuDrag.image, deltaX, deltaY, skuDrag.context);
+    if (skuDrag.layerKey === "ksp") {
+      setKspOffsetY(outputId, getKspOffsetY(outputId, skuDrag.context) + deltaY, skuDrag.context);
+    } else {
+      updateLayerPositionFromDrag(outputId, skuDrag.layerKey, skuDrag.image, deltaX, deltaY, skuDrag.context);
+    }
     requestCanvasRedraw(outputId, canvas, skuDrag.context);
   });
 
@@ -1799,7 +2702,7 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
   const isBackgroundActive = activeLayerKey === "background";
   const isLogoActive = activeLayerKey === "logo";
   const isKspActive = activeLayerKey === "ksp";
-  const isDraggableLayer = activeLayerKey === "sku" || isBackgroundActive;
+  const isDraggableLayer = activeLayerKey === "sku" || isBackgroundActive || isKspActive;
   // Logo/SKU/BG all have a getZoom/setZoom pair via getSkuLayers(); KSP is
   // handled as its own special case below (its "zoom" is really a font
   // size, with different units/range), so it deliberately has no entry there.
@@ -1874,11 +2777,13 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
     zoomInput.value = String(Math.round(currentSize));
     zoomInput.setAttribute("aria-label", `${format.title} KSP font size`);
     zoomValue.textContent = `${zoomInput.value}px`;
+    zoomInput.addEventListener("pointerdown", () => commitHistoryStart(context));
     zoomInput.addEventListener("input", () => {
       setKspFontSize(outputId, Number(zoomInput.value), layout, context);
       zoomValue.textContent = `${zoomInput.value}px`;
       if (canvas) requestCanvasRedraw(outputId, canvas, context);
     });
+    zoomInput.addEventListener("change", () => commitHistoryEnd(context));
   } else {
     const zoomMin = isLogoActive ? LOGO_ZOOM_MIN : SKU_ZOOM_MIN;
     const zoomMax = isLogoActive ? LOGO_ZOOM_MAX : SKU_ZOOM_MAX;
@@ -1891,11 +2796,13 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
     zoomInput.value = String(Math.round(activeLayer.getZoom(outputId) * 100));
     zoomInput.setAttribute("aria-label", `${format.title} ${layerNoun.toLowerCase()} zoom`);
     zoomValue.textContent = `${zoomInput.value}%`;
+    zoomInput.addEventListener("pointerdown", () => commitHistoryStart(context));
     zoomInput.addEventListener("input", () => {
       activeLayer.setZoom(outputId, Number(zoomInput.value) / 100);
       zoomValue.textContent = `${zoomInput.value}%`;
       if (canvas) requestCanvasRedraw(outputId, canvas, context);
     });
+    zoomInput.addEventListener("change", () => commitHistoryEnd(context));
   }
 
   zoomControl.append(zoomLabel, zoomInput, zoomValue);
@@ -1913,12 +2820,14 @@ function createPreviewBlock(outputId, context = state, onRerender = renderPrevie
   shell.className = "canvas-shell";
   canvas = document.createElement("canvas");
   canvas.className = "asset-canvas";
-  // Only SKU/BG are draggable on the canvas — Logo and KSP are zoom/size-
-  // only controls with no repositioning.
+  // SKU/BG drag an image; KSP drags its own text box (vertical-only); Logo
+  // has no drag at all — just its zoom slider.
   const activeLayerHasImage = isDraggableLayer
     ? isBackgroundActive
       ? hasSkuBackground(context)
-      : Boolean(context.skuImageUrl)
+      : isKspActive
+        ? Boolean(context.ksp && context.ksp.trim())
+        : Boolean(context.skuImageUrl)
     : false;
   if (activeLayerHasImage) canvas.classList.add("can-drag");
   canvas.dataset.output = outputId;
@@ -2094,14 +3003,13 @@ function readFile(input, key, labelKey, labelEl) {
   if (!file) return;
 
   const context = editingContext();
-  if (context[key]?.startsWith("blob:")) {
-    imageCache.delete(context[key]);
-    URL.revokeObjectURL(context[key]);
-  }
-
+  // The previous blob URL (if any) is deliberately left alive so undo can
+  // restore it — see the comment in removeBackgroundFromSku.
   context[key] = URL.createObjectURL(file);
   context[labelKey] = titleCaseFileName(file.name);
   if (key === "skuImageUrl") {
+    // A freshly uploaded photo is a new "pristine" original.
+    context.originalSkuImageUrl = context[key];
     context.skuPositions = {};
     context.skuZooms = {};
   }
@@ -2171,6 +3079,9 @@ function syncEditorFieldsFromContext() {
   els.templateSelect.value = context.template;
   els.logoContainerToggle.checked = context.hideLogoContainer;
   els.shopeeLogoToggle.checked = context.useOrangeShopeeLogo;
+  // Checked = tag shown (matches its "Show ... tag" label), so this is the
+  // inverse of the internal hideShopeeMallTag flag.
+  if (els.shopeeMallLogoToggle) els.shopeeMallLogoToggle.checked = !context.hideShopeeMallTag;
   syncOutputAvailability(context);
 
   els.kspColorInput.value = context.kspColor;
@@ -2867,16 +3778,19 @@ function createBulkRowsFromCsv(text) {
       brandLogoUrl: "",
       brandLogoLabel: "",
       skuImageUrl: "",
+      originalSkuImageUrl: "",
       skuImageLabel: "",
       ksp: normalizedKsp(kspRaw),
       skuPositions: {},
       skuZooms: {},
       logoZooms: {},
       kspFontSizes: {},
+      kspOffsets: {},
       activeLayerByOutput: {},
       template: state.template,
       hideLogoContainer: state.hideLogoContainer,
       useOrangeShopeeLogo: state.useOrangeShopeeLogo,
+      hideShopeeMallTag: state.hideShopeeMallTag,
       kvColor: state.kvColor,
       kspColor: state.kspColor,
       hue: state.hue,
@@ -2909,6 +3823,7 @@ function ensureBulkRowResolved(row) {
       row.brandLogoUrl = brandLogoUrl;
       row.brandLogoLabel = row.brandLogoRaw ? imageLabelFromSource(row.brandLogoRaw) : "";
       row.skuImageUrl = skuImageUrl;
+      row.originalSkuImageUrl = skuImageUrl;
       row.skuImageLabel = row.skuImageRaw ? imageLabelFromSource(row.skuImageRaw) : "";
       row.resolved = true;
       row.imagesFailed = false;
@@ -2929,7 +3844,8 @@ function ensureBulkRowResolved(row) {
 // removed or the whole CSV is replaced — not after every generate — since
 // rows now cache their resolved images across preview + generate.
 function releaseBulkRowImages(row) {
-  [row.brandLogoUrl, row.skuImageUrl].forEach((url) => {
+  const urls = new Set([row.brandLogoUrl, row.skuImageUrl, row.originalSkuImageUrl]);
+  urls.forEach((url) => {
     if (url?.startsWith("blob:")) {
       imageCache.delete(url);
       URL.revokeObjectURL(url);
@@ -3069,6 +3985,7 @@ async function enterRowEditing(row) {
 
   activeRow = row;
   syncEditorFieldsFromContext();
+  updateUndoRedoButtons();
   renderStageBanner();
   await renderPreviews();
   renderBulkRows();
@@ -3077,6 +3994,7 @@ async function enterRowEditing(row) {
 function exitRowEditing() {
   activeRow = null;
   syncEditorFieldsFromContext();
+  updateUndoRedoButtons();
   renderStageBanner();
   renderPreviews();
   renderBulkRows();
@@ -3179,29 +4097,50 @@ async function generateBulk() {
 
 els.templateSelect.addEventListener("change", (event) => {
   const context = editingContext();
+  commitHistoryStart(context);
   context.template = event.target.value;
   syncKvColorAvailability(context);
   syncOutputAvailability(context);
+  commitHistoryEnd(context);
   renderPreviews();
   if (activeRow) renderBulkRows();
 });
 
 els.brandLogoInput.addEventListener("change", () => {
+  commitHistoryStart(editingContext());
   readFile(els.brandLogoInput, "brandLogoUrl", "brandLogoLabel", els.brandFileName);
+  commitHistoryEnd(editingContext());
 });
 
 els.logoContainerToggle.addEventListener("change", (event) => {
-  editingContext().hideLogoContainer = event.target.checked;
+  const context = editingContext();
+  commitHistoryStart(context);
+  context.hideLogoContainer = event.target.checked;
+  commitHistoryEnd(context);
   renderPreviews();
 });
 
 els.shopeeLogoToggle.addEventListener("change", (event) => {
-  editingContext().useOrangeShopeeLogo = event.target.checked;
+  const context = editingContext();
+  commitHistoryStart(context);
+  context.useOrangeShopeeLogo = event.target.checked;
+  commitHistoryEnd(context);
+  renderPreviews();
+});
+
+els.shopeeMallLogoToggle?.addEventListener("change", (event) => {
+  const context = editingContext();
+  commitHistoryStart(context);
+  // Checked = tag shown, so the internal flag is the inverse.
+  context.hideShopeeMallTag = !event.target.checked;
+  commitHistoryEnd(context);
   renderPreviews();
 });
 
 els.skuImageInput.addEventListener("change", () => {
+  commitHistoryStart(editingContext());
   readFile(els.skuImageInput, "skuImageUrl", "skuImageLabel", els.skuFileName);
+  commitHistoryEnd(editingContext());
 });
 
 els.skuLink.addEventListener("input", (event) => {
@@ -3226,6 +4165,9 @@ els.editSkuResetButton?.addEventListener("click", () => {
 });
 els.editSkuEraseButton?.addEventListener("click", () => setEditSkuTool("erase"));
 els.editSkuRestoreButton?.addEventListener("click", () => setEditSkuTool("restore"));
+els.editSkuBackdropButtons?.forEach((button) => {
+  button.addEventListener("click", () => setEditSkuBackdrop(button.dataset.backdrop));
+});
 els.editSkuBrushSize?.addEventListener("input", (event) => {
   if (!editSkuState) return;
   editSkuState.brushSize = Number(event.target.value);
@@ -3288,7 +4230,10 @@ function renderBackgroundThumbGrid() {
   noneTile.setAttribute("aria-label", "No background scene");
   noneTile.innerHTML = `<span class="bg-thumb-label">None</span>`;
   noneTile.addEventListener("click", () => {
-    chooseSkuBackground(-1, editingContext());
+    const context = editingContext();
+    commitHistoryStart(context);
+    chooseSkuBackground(-1, context);
+    commitHistoryEnd(context);
     renderBackgroundPicker();
     renderPreviews();
   });
@@ -3304,7 +4249,10 @@ function renderBackgroundThumbGrid() {
     tile.setAttribute("aria-label", background.label);
     tile.innerHTML = `<span class="bg-thumb-label">${background.label}</span>`;
     tile.addEventListener("click", () => {
-      chooseSkuBackground(index, editingContext());
+      const context = editingContext();
+      commitHistoryStart(context);
+      chooseSkuBackground(index, context);
+      commitHistoryEnd(context);
       renderBackgroundPicker();
       renderPreviews();
     });
@@ -3354,9 +4302,20 @@ function syncSkuBackgroundColorAvailability(context) {
   if (els.skuBgColorDot) els.skuBgColorDot.style.background = colorValue;
 }
 
+// Continuous-value fields (text/color/range) commit one undo step per
+// "editing session" — opened on focus, closed on change (fires once on
+// blur for text/color inputs, once on release for range inputs) — rather
+// than once per keystroke or per drag tick.
+function wrapHistorySession(input) {
+  if (!input) return;
+  input.addEventListener("focus", () => commitHistoryStart(editingContext()));
+  input.addEventListener("change", () => commitHistoryEnd(editingContext()));
+}
+
 els.skuBgColorInput?.addEventListener("input", (event) => {
   setSkuBackgroundColor(event.target.value);
 });
+wrapHistorySession(els.skuBgColorInput);
 
 els.skuBgColorHex?.addEventListener("input", (event) => {
   const value = event.target.value.startsWith("#")
@@ -3364,6 +4323,7 @@ els.skuBgColorHex?.addEventListener("input", (event) => {
     : `#${event.target.value}`;
   if (isHex(value)) setSkuBackgroundColor(value);
 });
+wrapHistorySession(els.skuBgColorHex);
 
 els.kspInput.addEventListener("input", (event) => {
   const value = normalizedKsp(event.target.value);
@@ -3377,10 +4337,12 @@ els.kspInput.addEventListener("input", (event) => {
   syncKspCount();
   renderPreviews();
 });
+wrapHistorySession(els.kspInput);
 
 els.kspColorInput.addEventListener("input", (event) => {
   setKspColor(event.target.value);
 });
+wrapHistorySession(els.kspColorInput);
 
 els.kspColorHex.addEventListener("input", (event) => {
   const value = event.target.value.startsWith("#")
@@ -3388,10 +4350,12 @@ els.kspColorHex.addEventListener("input", (event) => {
     : `#${event.target.value}`;
   if (isHex(value)) setKspColor(value);
 });
+wrapHistorySession(els.kspColorHex);
 
 els.nativeColor.addEventListener("input", (event) => {
   setColor(event.target.value);
 });
+wrapHistorySession(els.nativeColor);
 
 els.hexInput.addEventListener("input", (event) => {
   const value = event.target.value.startsWith("#")
@@ -3399,6 +4363,7 @@ els.hexInput.addEventListener("input", (event) => {
     : `#${event.target.value}`;
   if (isHex(value)) setColor(value);
 });
+wrapHistorySession(els.hexInput);
 
 els.hueRange.addEventListener("input", (event) => {
   const context = editingContext();
@@ -3406,9 +4371,12 @@ els.hueRange.addEventListener("input", (event) => {
   const nextColor = rgbToHex(hsvToRgb(context.hue, context.saturation, context.value));
   setColor(nextColor, false);
 });
+els.hueRange.addEventListener("pointerdown", () => commitHistoryStart(editingContext()));
+els.hueRange.addEventListener("change", () => commitHistoryEnd(editingContext()));
 
 els.colorCanvas.addEventListener("pointerdown", (event) => {
   els.colorCanvas.setPointerCapture(event.pointerId);
+  commitHistoryStart(editingContext());
   updateColorFromCanvas(event);
 });
 
@@ -3417,30 +4385,53 @@ els.colorCanvas.addEventListener("pointermove", (event) => {
   updateColorFromCanvas(event);
 });
 
+["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
+  els.colorCanvas.addEventListener(eventName, () => commitHistoryEnd(editingContext()));
+});
+
 window.addEventListener("resize", drawColorCanvas);
 
 els.outputButtons.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-output]");
   if (!button) return;
 
+  const context = editingContext();
+  commitHistoryStart(context);
   const { output } = button.dataset;
-  const outputs = editingContext().outputs;
+  const outputs = context.outputs;
   if (outputs.has(output)) outputs.delete(output);
   else outputs.add(output);
+  commitHistoryEnd(context);
 
   syncOutputButtons();
   renderPreviews();
   if (activeRow) renderBulkRows();
 });
 
-els.generateButton.addEventListener("click", () => {
-  els.previewList.classList.remove("is-rendering");
-  void els.previewList.offsetWidth;
-  els.previewList.classList.add("is-rendering");
-  renderPreviews();
-});
-
 els.downloadAllButton.addEventListener("click", downloadAll);
+
+els.undoButton?.addEventListener("click", undo);
+els.redoButton?.addEventListener("click", redo);
+
+document.addEventListener("keydown", (event) => {
+  // Let native undo run inside the Touch Up modal or a plain text field —
+  // this app-wide shortcut is only for the sidebar/preview editing state.
+  if (editSkuState) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === "TEXTAREA" || (tag === "INPUT" && document.activeElement.type === "text")) return;
+
+  const isUndo = (event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z";
+  const isRedo =
+    (event.metaKey || event.ctrlKey) &&
+    ((event.shiftKey && event.key.toLowerCase() === "z") || event.key.toLowerCase() === "y");
+  if (isUndo) {
+    event.preventDefault();
+    undo();
+  } else if (isRedo) {
+    event.preventDefault();
+    redo();
+  }
+});
 
 els.bulkDefaultOutputs.querySelectorAll("button[data-output]").forEach((button) => {
   button.classList.toggle("is-active", bulkState.defaultOutputs.has(button.dataset.output));
@@ -3471,6 +4462,7 @@ els.bulkCsvInput.addEventListener("change", async () => {
     activeRow = null;
     if (wasEditingRow) {
       syncEditorFieldsFromContext();
+      updateUndoRedoButtons();
       renderStageBanner();
       renderPreviews();
     }
@@ -3550,3 +4542,4 @@ renderBackgroundThumbGrid();
 renderBackgroundPicker();
 renderBulkRows();
 initTheme();
+updateUndoRedoButtons();
